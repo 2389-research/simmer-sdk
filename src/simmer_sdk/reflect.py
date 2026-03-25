@@ -453,6 +453,8 @@ def _parse_reflect_output(
     judge_asi: str,
 ) -> dict:
     """Parse the structured reflect LLM output into a dict of values."""
+    if not text:
+        text = ""
     result: dict = {}
 
     # Best iteration
@@ -602,7 +604,11 @@ async def dispatch_reflect(
         await client.query(prompt)
         async for message in client.receive_response():
             if isinstance(message, ResultMessage):
-                reflect_text = message.result if hasattr(message, "result") else str(message)
+                reflect_text = (message.result or "") if hasattr(message, "result") else str(message)
+
+    # Ensure reflect_text is a string
+    if not reflect_text:
+        reflect_text = ""
 
     # Parse the structured text output for control flow data
     parsed = _parse_reflect_output(
