@@ -1,0 +1,26 @@
+[project]
+name = "simmer-sdk"
+version = "0.1.0"
+description = "Programmatic simmer iterative refinement loop using the Claude Agent SDK"
+readme = "README.md"
+authors = [
+    { name = "sugi-chan", email = "32246928+sugi-chan@users.noreply.github.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40.0",
+    "claude-agent-sdk>=0.1.50",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.3,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
