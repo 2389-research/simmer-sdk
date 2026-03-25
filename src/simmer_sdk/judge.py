@@ -171,7 +171,7 @@ async def dispatch_judge(
         tools=["Read", "Grep", "Glob"],
         model=brief.judge_model,
         permission_mode="bypassPermissions",
-        cwd=workspace_path,
+        cwd=workspace_path if is_workspace else brief.output_dir,
         max_turns=10,
     )
 

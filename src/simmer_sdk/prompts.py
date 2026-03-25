@@ -623,6 +623,7 @@ def build_board_panelist_prompt(
     candidate_path: Optional[str] = None,
     evaluator_path: Optional[str] = None,
     prior_candidate_paths: Optional[list[str]] = None,
+    output_contract: Optional[str] = None,
 ) -> str:
     """Build the full prompt for a single panelist on the judge board.
 
@@ -708,6 +709,15 @@ def build_board_panelist_prompt(
     # --- Core parameters ---
     parts.append(f"\nITERATION: {iteration}")
     parts.append(f"\nCRITERIA:\n{_format_criteria(criteria)}")
+
+    # --- Output contract (Gap Fix 7) ---
+    if output_contract:
+        parts.append(
+            f"\nOUTPUT_CONTRACT:\n{output_contract}\n"
+            "Check evaluator output against this contract. Contract violations are more severe\n"
+            "than poor scores — they indicate an infrastructure problem, not a quality problem."
+        )
+
     parts.append(f"\nCANDIDATE:\n{candidate}")
 
     # --- Seed calibration ---

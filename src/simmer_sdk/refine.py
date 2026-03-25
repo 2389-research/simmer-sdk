@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import re
 import subprocess
 from pathlib import Path
 from typing import Callable, Optional
@@ -31,6 +32,7 @@ from simmer_sdk.reflect import (
     track_stable_wins,
     track_exploration,
     write_trajectory_md,
+    format_trajectory_table,
     condense_key_change_llm,
 )
 
@@ -240,6 +242,19 @@ async def refine(
     out_path = Path(brief.output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
+    # Gap Fix 5: Compute evaluator_path so judges can read the evaluator script
+    evaluator_path: str | None = None
+    if brief.evaluator:
+        import shlex
+        try:
+            parts_eval = shlex.split(brief.evaluator)
+            for part in parts_eval:
+                if part.endswith(('.py', '.sh', '.bash', '.rb', '.js')):
+                    evaluator_path = part
+                    break
+        except ValueError:
+            pass
+
     # ------------------------------------------------------------------
     # Step 1: Load initial candidate
     # ------------------------------------------------------------------
@@ -250,6 +265,7 @@ async def refine(
     exploration_status: str = ""
     seed_candidate: str | None = None
     seed_scores: dict[str, int] | None = None
+    current_direction: str = ""
 
     # ------------------------------------------------------------------
     # Step 2: Iteration 0 — Judge the seed
@@ -286,6 +302,16 @@ async def refine(
     # Judge the seed
     candidate_path = str(out_path / "iteration-0-candidate.md") if brief.artifact_type == "single-file" else None
 
+    # Gap Fix 6: Cache board composition before the loop
+    cached_board_judges: list[JudgeDefinition] | None = None
+    if brief.judge_mode == "board":
+        from simmer_sdk.judge_board import compose_judges
+        cached_board_judges = await compose_judges(
+            brief=brief,
+            problem_class=problem_class,
+            candidate_summary=current_candidate[:500],
+        )
+
     if brief.judge_mode == "board":
         judge_result = await dispatch_board(
             brief=brief,
@@ -294,6 +320,8 @@ async def refine(
             candidate=current_candidate,
             evaluator_output=evaluator_output or None,
             candidate_path=candidate_path,
+            evaluator_path=evaluator_path,
+            cached_judges=cached_board_judges,
         )
     else:
         judge_result = await dispatch_judge(
@@ -303,6 +331,7 @@ async def refine(
             candidate=current_candidate,
             evaluator_output=evaluator_output or None,
             candidate_path=candidate_path,
+            evaluator_path=evaluator_path,
         )
 
     seed_scores = judge_result.scores
@@ -321,8 +350,21 @@ async def refine(
 
     if judge_result.deliberation_summary:
         panel_summary = judge_result.deliberation_summary
+        # Gap Fix 8: Parse DIRECTION from deliberation summary
+        direction_match = re.search(
+            r'DIRECTION:\s*\n?(.*?)(?:\n\n|\Z)',
+            judge_result.deliberation_summary,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if direction_match:
+            current_direction = direction_match.group(1).strip()
 
-    await _call_callback(on_iteration, 0, record)
+    # Gap Fix 9: Pass trajectory table to callback
+    trajectory_table = format_trajectory_table(
+        trajectory, list(brief.criteria.keys()),
+        find_best(trajectory, brief.primary), brief.primary,
+    )
+    await _call_callback(on_iteration, record, trajectory, trajectory_table)
 
     # ------------------------------------------------------------------
     # Step 3: Iterations 1-N
@@ -397,7 +439,9 @@ async def refine(
                 exploration_status=None if is_minimal_context else (exploration_status or None),
                 stable_wins=stable_wins,
                 candidate_path=candidate_path,
+                evaluator_path=evaluator_path,
                 prior_candidate_paths=prior_candidate_paths,
+                cached_judges=cached_board_judges,
             )
         else:
             judge_result = await dispatch_judge(
@@ -412,6 +456,7 @@ async def refine(
                 iteration_history=None if is_minimal_context else iteration_history,
                 exploration_status=None if is_minimal_context else (exploration_status or None),
                 candidate_path=candidate_path,
+                evaluator_path=evaluator_path,
                 prior_candidate_paths=prior_candidate_paths,
             )
 
@@ -436,11 +481,27 @@ async def refine(
 
         if judge_result.deliberation_summary:
             panel_summary = judge_result.deliberation_summary
+            # Gap Fix 8: Parse DIRECTION from deliberation summary
+            direction_match = re.search(
+                r'DIRECTION:\s*\n?(.*?)(?:\n\n|\Z)',
+                judge_result.deliberation_summary,
+                re.DOTALL | re.IGNORECASE,
+            )
+            if direction_match:
+                current_direction = direction_match.group(1).strip()
 
         stable_wins_obj = track_stable_wins(trajectory)
+        # Gap Fix 8: Populate direction on stable_wins_obj
+        if current_direction:
+            stable_wins_obj.direction = current_direction
         exploration_status = track_exploration(trajectory, brief.search_space)
 
-        await _call_callback(on_iteration, i, record)
+        # Gap Fix 9: Pass trajectory table to callback
+        trajectory_table = format_trajectory_table(
+            trajectory, list(brief.criteria.keys()),
+            find_best(trajectory, brief.primary), brief.primary,
+        )
+        await _call_callback(on_iteration, record, trajectory, trajectory_table)
 
         # f) Plateau detection
         if check_plateau(trajectory, brief.primary):

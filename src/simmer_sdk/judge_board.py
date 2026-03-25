@@ -176,6 +176,7 @@ async def _dispatch_single_panelist(
     candidate_path: Optional[str] = None,
     evaluator_path: Optional[str] = None,
     prior_candidate_paths: Optional[list[str]] = None,
+    output_contract: Optional[str] = None,
 ) -> tuple[str, str, JudgeOutput]:
     """Dispatch a single panelist and return (name, raw_text, parsed_output)."""
     primitives = get_primitives_for_judge(
@@ -204,6 +205,7 @@ async def _dispatch_single_panelist(
         candidate_path=candidate_path,
         evaluator_path=evaluator_path,
         prior_candidate_paths=prior_candidate_paths,
+        output_contract=output_contract,
     )
 
     is_workspace = brief.artifact_type == "workspace"
@@ -213,7 +215,7 @@ async def _dispatch_single_panelist(
         tools=["Read", "Grep", "Glob"],
         model=brief.judge_model,
         permission_mode="bypassPermissions",
-        cwd=workspace_path,
+        cwd=workspace_path if is_workspace else brief.output_dir,
         max_turns=10,
     )
 
@@ -357,6 +359,7 @@ async def dispatch_board(
     candidate_path: Optional[str] = None,
     evaluator_path: Optional[str] = None,
     prior_candidate_paths: Optional[list[str]] = None,
+    cached_judges: Optional[list[JudgeDefinition]] = None,
 ) -> JudgeOutput:
     """Orchestrate the full board: compose, score in parallel, deliberate, synthesize.
 
@@ -364,9 +367,12 @@ async def dispatch_board(
     output — the rest of the loop does not need to know whether it came from
     a single judge or a board.
     """
-    # --- Compose panel ---
-    candidate_summary = candidate[:2000] if len(candidate) > 2000 else candidate
-    judges = await compose_judges(brief, problem_class, candidate_summary)
+    # --- Compose panel (use cached if provided) ---
+    if cached_judges is not None:
+        judges = cached_judges
+    else:
+        candidate_summary = candidate[:2000] if len(candidate) > 2000 else candidate
+        judges = await compose_judges(brief, problem_class, candidate_summary)
 
     # Build previous deliberation string from stable_wins
     previous_deliberation: Optional[str] = None
@@ -403,6 +409,7 @@ async def dispatch_board(
                 candidate_path=candidate_path,
                 evaluator_path=evaluator_path,
                 prior_candidate_paths=prior_candidate_paths,
+                output_contract=brief.output_contract,
             )
             phase1_results.append(result)
 
