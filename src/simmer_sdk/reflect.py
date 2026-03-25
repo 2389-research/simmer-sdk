@@ -321,90 +321,19 @@ def _build_reflect_prompt(
     artifact_type: str,
     search_space: str | None,
 ) -> str:
-    """Build the prompt for the reflect LLM call."""
-    criteria_list = "\n".join(f"  - {k}: {v}" for k, v in criteria.items())
-    primary_note = f"\nPrimary criterion (tie-breaker priority): {primary}" if primary else ""
-    search_space_section = (
-        f"\n\nSEARCH SPACE:\n{search_space}"
-        if search_space
-        else ""
+    """Build the reflect prompt using the actual skill file."""
+    from simmer_sdk.prompts import build_reflect_prompt
+    return build_reflect_prompt(
+        judge_output_text=judge_output_text,
+        generator_report=generator_report,
+        iteration=iteration,
+        max_iterations=max_iterations,
+        criteria=criteria,
+        primary=primary,
+        artifact_type=artifact_type,
+        search_space=search_space,
+        current_trajectory_md=trajectory_md,
     )
-
-    return f"""You are the REFLECT step in an iterative refinement loop (simmer).
-
-Your job:
-1. Read the judge's output and the existing trajectory table
-2. Extract the scores for each criterion from the judge's output
-3. Add a new row to the trajectory table for iteration {iteration}
-4. Compute the composite score (average of all criterion scores)
-5. Determine the best iteration so far (primary criterion first if set, composite as tiebreaker)
-6. Check for regression (is this iteration worse than the best so far?)
-7. Condense the generator report into a key_change label (under 60 chars, capture WHAT changed)
-8. Track stable wins (what's working vs not working based on the trajectory pattern)
-9. Track exploration status (what's been tried vs untried from the search space)
-10. Output the structured reflect result AND the full updated trajectory table
-
-CRITERIA:
-{criteria_list}{primary_note}
-
-ARTIFACT TYPE: {artifact_type}
-ITERATION: {iteration} of {max_iterations}
-ITERATIONS REMAINING: {max_iterations - iteration}{search_space_section}
-
-JUDGE OUTPUT (this iteration):
----
-{judge_output_text}
----
-
-GENERATOR REPORT (what changed this iteration):
----
-{generator_report or "(no report)"}
----
-
-CURRENT TRAJECTORY.MD:
----
-{trajectory_md or "(empty — this is the first iteration)"}
----
-
-INSTRUCTIONS:
-- Extract the score for EACH criterion from the judge output. Scores are integers 1-10.
-- If the judge used slightly different names, match them to the criteria above.
-- Compute composite = average of all criterion scores, rounded to 1 decimal.
-- For best-so-far: if a primary criterion is set, compare primary first, then composite as tiebreaker. Earlier iteration wins ties.
-- Regression = this iteration's scores are strictly worse than best-so-far (primary first if set, then composite).
-- For key_change: condense the generator report to under 60 chars. Capture WHAT changed, not why. Examples: "added lookup table", "low-friction CTA", "dual-clock mechanic".
-- For stable wins: look at the trajectory. WORKING = non-seed, non-regressed changes that were NOT followed by a regression. NOT WORKING = changes that regressed or were followed by a regression.
-- Pass the judge's ASI through UNCHANGED.
-
-OUTPUT FORMAT (output EXACTLY this structure):
-
-ITERATION {iteration} RECORDED
-BEST SO FAR: iteration [N] (composite: [N.N]/10)
-REGRESSION: [true/false] — [if true: "rollback to iteration N"; if false: "no rollback needed"]
-ITERATIONS REMAINING: {max_iterations - iteration}
-ASI FOR NEXT ROUND:
-[copy the judge's ASI here exactly, unchanged]
-EXPLORATION STATUS:
-[what's been tried vs untried from the search space, or "no search space" if none]
-STABLE WINS:
-WORKING: [comma-separated list, or "none yet"]
-NOT WORKING: [comma-separated list, or "none yet"]
-DIRECTION: [1-sentence summary of the trajectory trend]
-KEY CHANGE: [the condensed key_change label, under 60 chars]
-
-SCORES:
-[criterion1]: [score]
-[criterion2]: [score]
-COMPOSITE: [N.N]
-
-TRAJECTORY TABLE:
-[output the FULL updated markdown table including ALL iterations, with the new row added]
-| Iteration | {" | ".join(criteria.keys())} | Composite | Key Change |
-|{"|".join("-----------" for _ in range(len(criteria) + 3))}|
-[all rows including the new one; mark regressions with [REGRESSION] in Key Change]
-
-Best candidate: iteration [N] (composite: [N.N]/10)
-"""
 
 
 def _parse_reflect_output(
