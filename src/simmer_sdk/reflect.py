@@ -415,6 +415,54 @@ def _get_primary_from_trajectory(
     return None
 
 
+def _fix_iteration_numbering(trajectory_md: str, expected_latest: int) -> str:
+    """Verify and fix iteration numbers in trajectory.md.
+
+    The reflect LLM sometimes mislabels iteration numbers (e.g., writes "3"
+    instead of "2"). This function checks that iteration numbers are sequential
+    (0, 1, 2, ...) and fixes the last row if it doesn't match expected_latest.
+    """
+    if not trajectory_md:
+        return trajectory_md
+
+    lines = trajectory_md.split("\n")
+    fixed_lines = []
+    data_rows_seen = 0
+
+    for line in lines:
+        # Match table data rows (start with | followed by a number)
+        stripped = line.strip()
+        if stripped.startswith("|") and not stripped.startswith("| Iter") and not stripped.startswith("|---"):
+            cells = [c.strip() for c in stripped.split("|") if c.strip()]
+            if cells:
+                try:
+                    row_iter = int(cells[0])
+                    # The last data row should have iteration == expected_latest
+                    # We'll fix it on the final pass below
+                    data_rows_seen += 1
+                except (ValueError, IndexError):
+                    pass
+        fixed_lines.append(line)
+
+    # Now fix: find the last data row and ensure its iteration matches
+    for i in range(len(fixed_lines) - 1, -1, -1):
+        stripped = fixed_lines[i].strip()
+        if stripped.startswith("|") and not stripped.startswith("| Iter") and not stripped.startswith("|---"):
+            cells = [c.strip() for c in stripped.split("|") if c.strip()]
+            if cells:
+                try:
+                    row_iter = int(cells[0])
+                    if row_iter != expected_latest:
+                        # Fix the iteration number
+                        cells[0] = str(expected_latest)
+                        fixed_lines[i] = "| " + " | ".join(cells) + " |"
+                    break
+                except (ValueError, IndexError):
+                    break
+
+    return "\n".join(fixed_lines)
+
+
 # ---------------------------------------------------------------------------
 # LLM-based reflect dispatch
 # ---------------------------------------------------------------------------
@@ -624,6 +672,12 @@ async def dispatch_reflect(
     trajectory_table = ""
     if trajectory_md_path.exists():
         trajectory_table = trajectory_md_path.read_text(encoding="utf-8")
+
+    # Verify iteration numbers are correct — the LLM sometimes mislabels them.
+    # Fix any mislabeled iteration number for the current row.
+    trajectory_table = _fix_iteration_numbering(trajectory_table, iteration)
+    if trajectory_table:
+        trajectory_md_path.write_text(trajectory_table, encoding="utf-8")
 
     # Extract scores from trajectory.md — it's a well-defined markdown table
     scores = _extract_scores_from_trajectory(trajectory_table, iteration, criteria)
