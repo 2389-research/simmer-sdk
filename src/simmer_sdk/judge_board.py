@@ -211,7 +211,7 @@ async def _dispatch_single_panelist(
     is_workspace = brief.artifact_type == "workspace"
     workspace_path: Optional[str] = brief.artifact if is_workspace else None
 
-    max_turns = 25 if problem_class == "text/creative" else 15
+    max_turns = 25
 
     options = ClaudeAgentOptions(
         tools=["Read", "Grep", "Glob"],

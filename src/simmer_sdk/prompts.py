@@ -311,15 +311,14 @@ Every iteration:
     if problem_class == "text/creative":
         investigation_block += """
 FOR CREATIVE ARTIFACTS — investigate STRUCTURE, not just surface quality:
-- Does the piece converge or diverge? If every path leads to the same
-  climax, that's a structural weakness in player agency.
-- Are there genuine mid-point decision forks, or just a starting choice
+- Does the piece converge or diverge? Are there genuine structural
+  branches, or do all paths lead to the same outcome?
+- Are there mid-point decision forks, or just a starting choice
   followed by a linear sequence?
 - Does the structure create tension BETWEEN threads (competing priorities,
-  time-cost tradeoffs) or only WITHIN them (combat difficulty)?
+  time-cost tradeoffs) or only WITHIN them?
 - What structural innovations would make this fundamentally more
-  interesting, not just better-polished? Think about interruption events,
-  faction consequences, NPCs who change behavior based on party choices.
+  interesting, not just better-polished?
 - Surface improvements (better prose, more sensory detail) are less
   valuable than structural improvements (new decision points, branching
   consequences, competing objectives).
@@ -334,9 +333,7 @@ HOW you analyze, not WHAT you analyze.
 ── STEP 3: ASI (informed by research) ──
 
 Your ASI candidate must be actionable within the generator's bounds.
-For creative artifacts, prioritize structural innovation over surface
-polish. "Add a mid-thread fork where the NPC refuses rescue" is more
-valuable than "add more sensory detail to the tavern scene."
+For creative artifacts, prioritize structural innovation over surface polish.
 """
     parts.append(investigation_block)
 
