@@ -29,11 +29,13 @@ from simmer_sdk.reflect import (
     record_iteration,
     find_best,
     check_plateau,
+    check_regression,
     track_stable_wins,
     track_exploration,
     write_trajectory_md,
     format_trajectory_table,
     condense_key_change_llm,
+    dispatch_reflect,
 )
 
 
@@ -460,47 +462,46 @@ async def refine(
                 prior_candidate_paths=prior_candidate_paths,
             )
 
-        # e) Reflect
-        key_change = (
-            await condense_key_change_llm(gen_output.report, model=brief.clerk_model)
-            if gen_output.report
-            else f"iteration-{i}"
+        # e) Reflect — LLM-based reflect mirroring the skill
+        reflect_output = await dispatch_reflect(
+            judge_output_text=judge_result.raw_text,
+            generator_report=gen_output.report,
+            iteration=i,
+            max_iterations=max_iterations,
+            criteria=brief.criteria,
+            primary=brief.primary,
+            artifact_type=brief.artifact_type,
+            search_space=brief.search_space,
+            output_dir=out_path,
+            model=brief.clerk_model,
+            judge_asi=judge_result.asi,
+            judge_mode=brief.judge_mode,
         )
 
-        record = record_iteration(
-            iteration=i,
-            scores=judge_result.scores,
-            key_change=key_change,
-            asi=judge_result.asi,
-            judge_mode=brief.judge_mode,
-            trajectory=trajectory,
-            primary=brief.primary,
-        )
+        record = reflect_output.record
         trajectory.append(record)
-        write_trajectory_md(trajectory, list(brief.criteria.keys()), find_best(trajectory, brief.primary), brief.primary, out_path)
 
         if judge_result.deliberation_summary:
             panel_summary = judge_result.deliberation_summary
-            # Gap Fix 8: Parse DIRECTION from deliberation summary
-            direction_match = re.search(
-                r'DIRECTION:\s*\n?(.*?)(?:\n\n|\Z)',
-                judge_result.deliberation_summary,
-                re.DOTALL | re.IGNORECASE,
-            )
-            if direction_match:
-                current_direction = direction_match.group(1).strip()
 
-        stable_wins_obj = track_stable_wins(trajectory)
-        # Gap Fix 8: Populate direction on stable_wins_obj
-        if current_direction:
+        # Use reflect output for stable wins, exploration, direction
+        stable_wins_obj = reflect_output.stable_wins
+        if reflect_output.direction:
+            current_direction = reflect_output.direction
             stable_wins_obj.direction = current_direction
-        exploration_status = track_exploration(trajectory, brief.search_space)
+        elif current_direction:
+            stable_wins_obj.direction = current_direction
 
-        # Gap Fix 9: Pass trajectory table to callback
-        trajectory_table = format_trajectory_table(
-            trajectory, list(brief.criteria.keys()),
-            find_best(trajectory, brief.primary), brief.primary,
-        )
+        exploration_status = reflect_output.exploration_status
+
+        # Pass trajectory table from reflect output to callback
+        trajectory_table = reflect_output.trajectory_table
+        if not trajectory_table:
+            # Fallback: generate from Python if LLM didn't produce one
+            trajectory_table = format_trajectory_table(
+                trajectory, list(brief.criteria.keys()),
+                find_best(trajectory, brief.primary), brief.primary,
+            )
         await _call_callback(on_iteration, record, trajectory, trajectory_table)
 
         # f) Plateau detection

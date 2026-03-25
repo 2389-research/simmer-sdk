@@ -87,6 +87,7 @@ class JudgeOutput:
     deliberation_summary: str | None = None
     panel_working: list[str] | None = None
     panel_not_working: list[str] | None = None
+    raw_text: str = ""
 
     @property
     def composite(self) -> float:

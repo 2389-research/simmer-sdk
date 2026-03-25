@@ -302,3 +302,303 @@ class ReflectOutput:
     asi: str
     exploration_status: str
     stable_wins: StableWins = field(default_factory=StableWins)
+    direction: str = ""
+    trajectory_table: str = ""
+
+
+# ---------------------------------------------------------------------------
+# LLM-based reflect dispatch
+# ---------------------------------------------------------------------------
+
+def _build_reflect_prompt(
+    judge_output_text: str,
+    generator_report: str,
+    trajectory_md: str,
+    iteration: int,
+    max_iterations: int,
+    criteria: dict[str, str],
+    primary: str | None,
+    artifact_type: str,
+    search_space: str | None,
+) -> str:
+    """Build the prompt for the reflect LLM call."""
+    criteria_list = "\n".join(f"  - {k}: {v}" for k, v in criteria.items())
+    primary_note = f"\nPrimary criterion (tie-breaker priority): {primary}" if primary else ""
+    search_space_section = (
+        f"\n\nSEARCH SPACE:\n{search_space}"
+        if search_space
+        else ""
+    )
+
+    return f"""You are the REFLECT step in an iterative refinement loop (simmer).
+
+Your job:
+1. Read the judge's output and the existing trajectory table
+2. Extract the scores for each criterion from the judge's output
+3. Add a new row to the trajectory table for iteration {iteration}
+4. Compute the composite score (average of all criterion scores)
+5. Determine the best iteration so far (primary criterion first if set, composite as tiebreaker)
+6. Check for regression (is this iteration worse than the best so far?)
+7. Condense the generator report into a key_change label (under 60 chars, capture WHAT changed)
+8. Track stable wins (what's working vs not working based on the trajectory pattern)
+9. Track exploration status (what's been tried vs untried from the search space)
+10. Output the structured reflect result AND the full updated trajectory table
+
+CRITERIA:
+{criteria_list}{primary_note}
+
+ARTIFACT TYPE: {artifact_type}
+ITERATION: {iteration} of {max_iterations}
+ITERATIONS REMAINING: {max_iterations - iteration}{search_space_section}
+
+JUDGE OUTPUT (this iteration):
+---
+{judge_output_text}
+---
+
+GENERATOR REPORT (what changed this iteration):
+---
+{generator_report or "(no report)"}
+---
+
+CURRENT TRAJECTORY.MD:
+---
+{trajectory_md or "(empty — this is the first iteration)"}
+---
+
+INSTRUCTIONS:
+- Extract the score for EACH criterion from the judge output. Scores are integers 1-10.
+- If the judge used slightly different names, match them to the criteria above.
+- Compute composite = average of all criterion scores, rounded to 1 decimal.
+- For best-so-far: if a primary criterion is set, compare primary first, then composite as tiebreaker. Earlier iteration wins ties.
+- Regression = this iteration's scores are strictly worse than best-so-far (primary first if set, then composite).
+- For key_change: condense the generator report to under 60 chars. Capture WHAT changed, not why. Examples: "added lookup table", "low-friction CTA", "dual-clock mechanic".
+- For stable wins: look at the trajectory. WORKING = non-seed, non-regressed changes that were NOT followed by a regression. NOT WORKING = changes that regressed or were followed by a regression.
+- Pass the judge's ASI through UNCHANGED.
+
+OUTPUT FORMAT (output EXACTLY this structure):
+
+ITERATION {iteration} RECORDED
+BEST SO FAR: iteration [N] (composite: [N.N]/10)
+REGRESSION: [true/false] — [if true: "rollback to iteration N"; if false: "no rollback needed"]
+ITERATIONS REMAINING: {max_iterations - iteration}
+ASI FOR NEXT ROUND:
+[copy the judge's ASI here exactly, unchanged]
+EXPLORATION STATUS:
+[what's been tried vs untried from the search space, or "no search space" if none]
+STABLE WINS:
+WORKING: [comma-separated list, or "none yet"]
+NOT WORKING: [comma-separated list, or "none yet"]
+DIRECTION: [1-sentence summary of the trajectory trend]
+KEY CHANGE: [the condensed key_change label, under 60 chars]
+
+SCORES:
+[criterion1]: [score]
+[criterion2]: [score]
+COMPOSITE: [N.N]
+
+TRAJECTORY TABLE:
+[output the FULL updated markdown table including ALL iterations, with the new row added]
+| Iteration | {" | ".join(criteria.keys())} | Composite | Key Change |
+|{"|".join("-----------" for _ in range(len(criteria) + 3))}|
+[all rows including the new one; mark regressions with [REGRESSION] in Key Change]
+
+Best candidate: iteration [N] (composite: [N.N]/10)
+"""
+
+
+def _parse_reflect_output(
+    text: str,
+    iteration: int,
+    max_iterations: int,
+    criteria: dict[str, str],
+    judge_asi: str,
+) -> dict:
+    """Parse the structured reflect LLM output into a dict of values."""
+    result: dict = {}
+
+    # Best iteration
+    best_match = re.search(r"BEST SO FAR:\s*iteration\s+(\d+)\s*\(composite:\s*([\d.]+)", text, re.IGNORECASE)
+    if best_match:
+        result["best_iteration"] = int(best_match.group(1))
+        result["best_composite"] = float(best_match.group(2))
+    else:
+        result["best_iteration"] = iteration
+        result["best_composite"] = 0.0
+
+    # Regression
+    regression_match = re.search(r"REGRESSION:\s*(true|false)", text, re.IGNORECASE)
+    result["regression"] = bool(regression_match and regression_match.group(1).lower() == "true")
+
+    # Rollback
+    rollback_match = re.search(r"rollback to iteration\s+(\d+)", text, re.IGNORECASE)
+    result["regression_rollback_to"] = int(rollback_match.group(1)) if rollback_match and result["regression"] else None
+
+    # Iterations remaining
+    result["iterations_remaining"] = max_iterations - iteration
+
+    # ASI — use the judge's original ASI as passthrough (most reliable)
+    asi_match = re.search(r"ASI FOR NEXT ROUND:\s*\n(.*?)(?=\nEXPLORATION STATUS:|\nSTABLE WINS:|\Z)", text, re.DOTALL | re.IGNORECASE)
+    if asi_match:
+        extracted_asi = asi_match.group(1).strip()
+        # Use extracted if non-empty, otherwise fall back to judge's ASI
+        result["asi"] = extracted_asi if extracted_asi else judge_asi
+    else:
+        result["asi"] = judge_asi
+
+    # Exploration status
+    exploration_match = re.search(r"EXPLORATION STATUS:\s*\n(.*?)(?=\nSTABLE WINS:|\nDIRECTION:|\Z)", text, re.DOTALL | re.IGNORECASE)
+    result["exploration_status"] = exploration_match.group(1).strip() if exploration_match else ""
+
+    # Stable wins
+    working_match = re.search(r"WORKING:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
+    not_working_match = re.search(r"NOT WORKING:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
+
+    working_text = working_match.group(1).strip() if working_match else ""
+    not_working_text = not_working_match.group(1).strip() if not_working_match else ""
+
+    working_list = [w.strip() for w in working_text.split(",") if w.strip() and w.strip().lower() != "none yet" and w.strip().lower() != "none"]
+    not_working_list = [w.strip() for w in not_working_text.split(",") if w.strip() and w.strip().lower() != "none yet" and w.strip().lower() != "none"]
+
+    result["stable_wins"] = StableWins(working=working_list, not_working=not_working_list)
+
+    # Direction
+    direction_match = re.search(r"DIRECTION:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
+    result["direction"] = direction_match.group(1).strip() if direction_match else ""
+    if result["direction"]:
+        result["stable_wins"].direction = result["direction"]
+
+    # Key change
+    key_change_match = re.search(r"KEY CHANGE:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
+    result["key_change"] = key_change_match.group(1).strip() if key_change_match else f"iteration-{iteration}"
+
+    # Scores
+    scores: dict[str, int] = {}
+    # Look in the SCORES section
+    scores_section_match = re.search(r"SCORES:\s*\n(.*?)(?=\nCOMPOSITE:|\nTRAJECTORY TABLE:|\Z)", text, re.DOTALL | re.IGNORECASE)
+    if scores_section_match:
+        scores_text = scores_section_match.group(1)
+        from simmer_sdk.judge import _normalize_key
+        criteria_norm = {_normalize_key(k): k for k in criteria}
+
+        score_pattern = re.compile(r"^\s*[-*]*\s*\**([A-Za-z][A-Za-z0-9_ \-]*?)\**:\s*(\d+)", re.MULTILINE)
+        for match in score_pattern.finditer(scores_text):
+            raw_name = match.group(1).strip()
+            score_val = int(match.group(2))
+            norm = _normalize_key(raw_name)
+
+            matched_key = criteria_norm.get(norm)
+            if matched_key is None:
+                for norm_crit, orig_key in criteria_norm.items():
+                    if norm.startswith(norm_crit) or norm_crit.startswith(norm):
+                        matched_key = orig_key
+                        break
+            if matched_key is None:
+                for norm_crit, orig_key in criteria_norm.items():
+                    if norm in norm_crit or norm_crit in norm:
+                        matched_key = orig_key
+                        break
+            if matched_key and matched_key not in scores:
+                scores[matched_key] = score_val
+
+    result["scores"] = scores
+
+    # Trajectory table — extract everything after "TRAJECTORY TABLE:"
+    table_match = re.search(r"TRAJECTORY TABLE:\s*\n(.*)", text, re.DOTALL | re.IGNORECASE)
+    result["trajectory_table"] = table_match.group(1).strip() if table_match else ""
+
+    return result
+
+
+async def dispatch_reflect(
+    judge_output_text: str,
+    generator_report: str,
+    iteration: int,
+    max_iterations: int,
+    criteria: dict[str, str],
+    primary: str | None,
+    artifact_type: str,
+    search_space: str | None,
+    output_dir: Path,
+    model: str = "claude-haiku-4-5",
+    judge_asi: str = "",
+    judge_mode: str = "single",
+) -> ReflectOutput:
+    """Dispatch the reflect step as an LLM call.
+
+    Mirrors the reflect subskill: the LLM reads the judge output + trajectory,
+    updates the table, computes composites, detects regression, tracks stable
+    wins, and writes the updated trajectory.md. No regex parsing of scores.
+    """
+    import anthropic
+
+    # Read current trajectory.md if it exists
+    trajectory_md_path = output_dir / "trajectory.md"
+    trajectory_md = ""
+    if trajectory_md_path.exists():
+        trajectory_md = trajectory_md_path.read_text(encoding="utf-8")
+
+    # Build the reflect prompt
+    prompt = _build_reflect_prompt(
+        judge_output_text=judge_output_text,
+        generator_report=generator_report,
+        trajectory_md=trajectory_md,
+        iteration=iteration,
+        max_iterations=max_iterations,
+        criteria=criteria,
+        primary=primary,
+        artifact_type=artifact_type,
+        search_space=search_space,
+    )
+
+    # Dispatch the LLM call
+    client = anthropic.AsyncAnthropic()
+    response = await client.messages.create(
+        model=model,
+        max_tokens=4096,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    reflect_text = response.content[0].text
+
+    # Parse the structured output
+    parsed = _parse_reflect_output(
+        text=reflect_text,
+        iteration=iteration,
+        max_iterations=max_iterations,
+        criteria=criteria,
+        judge_asi=judge_asi,
+    )
+
+    # Build the IterationRecord
+    scores = parsed["scores"]
+    key_change = parsed["key_change"]
+    regression = parsed["regression"]
+
+    record = IterationRecord(
+        iteration=iteration,
+        scores=scores,
+        key_change=key_change,
+        asi=parsed["asi"],
+        regressed=regression,
+        judge_mode=judge_mode,
+    )
+
+    # Write updated trajectory.md from LLM output
+    trajectory_table = parsed["trajectory_table"]
+    if trajectory_table:
+        updated_content = f"# Simmer Trajectory\n\n{trajectory_table}"
+        trajectory_md_path.write_text(updated_content, encoding="utf-8")
+
+    return ReflectOutput(
+        record=record,
+        best_iteration=parsed["best_iteration"],
+        best_composite=parsed["best_composite"],
+        regression=regression,
+        regression_rollback_to=parsed["regression_rollback_to"],
+        iterations_remaining=parsed["iterations_remaining"],
+        asi=parsed["asi"],
+        exploration_status=parsed["exploration_status"],
+        stable_wins=parsed["stable_wins"],
+        direction=parsed["direction"],
+        trajectory_table=trajectory_table,
+    )

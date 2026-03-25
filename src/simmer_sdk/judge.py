@@ -182,4 +182,6 @@ async def dispatch_judge(
             if isinstance(message, ResultMessage):
                 result_text = message.result if hasattr(message, "result") else str(message)
 
-    return parse_judge_output(result_text, brief.criteria)
+    output = parse_judge_output(result_text, brief.criteria)
+    output.raw_text = result_text
+    return output

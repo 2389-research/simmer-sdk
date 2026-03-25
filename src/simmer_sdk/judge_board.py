@@ -484,13 +484,13 @@ async def dispatch_board(
 
     asi, deliberation_summary = _parse_synthesis(synthesis_text, brief.criteria)
 
-    # If synthesis provided scores, use them; otherwise use computed consensus
-    synthesis_parsed = parse_judge_output(synthesis_text, brief.criteria)
-    final_scores = synthesis_parsed.scores if synthesis_parsed.scores else consensus
+    # Use the computed consensus scores — they're reliable Python math.
+    # Don't re-parse from synthesis text which is fragile.
+    final_scores = consensus
 
     return JudgeOutput(
         scores=final_scores,
-        asi=asi or synthesis_parsed.asi,
-        reasoning=synthesis_parsed.reasoning,
+        asi=asi,
         deliberation_summary=deliberation_summary or None,
+        raw_text=synthesis_text,
     )
