@@ -307,21 +307,17 @@ Every iteration:
   for solutions before proposing your ASI
 """
 
-    # Creative tasks need structural investigation, not just surface review
+    # Creative tasks benefit from domain research before scoring
     if problem_class == "text/creative":
         investigation_block += """
-FOR CREATIVE ARTIFACTS — investigate STRUCTURE, not just surface quality:
-- Does the piece converge or diverge? Are there genuine structural
-  branches, or do all paths lead to the same outcome?
-- Are there mid-point decision forks, or just a starting choice
-  followed by a linear sequence?
-- Does the structure create tension BETWEEN threads (competing priorities,
-  time-cost tradeoffs) or only WITHIN them?
-- What structural innovations would make this fundamentally more
-  interesting, not just better-polished?
-- Surface improvements (better prose, more sensory detail) are less
-  valuable than structural improvements (new decision points, branching
-  consequences, competing objectives).
+FOR CREATIVE ARTIFACTS — research before scoring:
+- Before scoring, research what experts in this domain consider
+  high-quality work. What are the known patterns, pitfalls, and
+  structural elements that distinguish great from good?
+- Use that as your evaluation framework — not just surface-level
+  observations about prose quality.
+- Structural improvements are more valuable than surface polish.
+  Your ASI should target the highest-leverage structural change.
 """
 
     investigation_block += """
@@ -333,7 +329,6 @@ HOW you analyze, not WHAT you analyze.
 ── STEP 3: ASI (informed by research) ──
 
 Your ASI candidate must be actionable within the generator's bounds.
-For creative artifacts, prioritize structural innovation over surface polish.
 """
     parts.append(investigation_block)
 
