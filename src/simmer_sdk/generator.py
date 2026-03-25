@@ -65,6 +65,8 @@ async def dispatch_generator(
     asi: str,
     panel_summary: str | None = None,
     exploration_status: str | None = None,
+    original_description: str | None = None,
+    regression_note: str | None = None,
 ) -> GeneratorOutput:
     """Dispatch the generator subagent via the Claude Agent SDK."""
     is_workspace = brief.artifact_type == "workspace"
@@ -87,6 +89,8 @@ async def dispatch_generator(
         search_space=brief.search_space,
         exploration_status=exploration_status,
         workspace_path=workspace_path,
+        original_description=original_description,
+        regression_note=regression_note,
     )
 
     if is_workspace:
@@ -98,7 +102,7 @@ async def dispatch_generator(
         tools=tools,
         model=brief.generator_model,
         permission_mode="bypassPermissions",
-        cwd=workspace_path if is_workspace else None,
+        cwd=workspace_path if is_workspace else brief.output_dir,
         max_turns=20,
     )
 

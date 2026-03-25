@@ -135,6 +135,8 @@ def build_generator_prompt(
     search_space: Optional[str] = None,
     exploration_status: Optional[str] = None,
     workspace_path: Optional[str] = None,
+    original_description: Optional[str] = None,
+    regression_note: Optional[str] = None,
 ) -> str:
     """Build the full prompt dispatched to the generator subagent.
 
@@ -193,6 +195,16 @@ def build_generator_prompt(
         if exploration_status:
             parts.append(f"\nEXPLORATION STATUS:\n{exploration_status}")
 
+        if original_description:
+            parts.append(
+                f"\nORIGINAL BRIEF:\n{original_description}\n\n"
+                "The above is the original description that defines scope, format, and constraints.\n"
+                "All iterations must respect these constraints."
+            )
+
+        if regression_note:
+            parts.append(f"\nREGRESSION NOTE:\n{regression_note}")
+
         parts.append(
             f"\nJUDGE FEEDBACK (ASI from previous round):\n{asi}"
         )
@@ -207,6 +219,13 @@ def build_generator_prompt(
         )
     else:
         # --- Single-file variant ---
+        if original_description:
+            parts.append(
+                f"\nORIGINAL BRIEF:\n{original_description}\n\n"
+                "The above is the original description that defines scope, format, and constraints.\n"
+                "All iterations must respect these constraints."
+            )
+
         parts.append(f"\nCURRENT CANDIDATE:\n{current_candidate}")
 
         if output_contract:
@@ -217,6 +236,9 @@ def build_generator_prompt(
             parts.append(f"\nSEARCH_SPACE:\n{search_space}")
         if exploration_status:
             parts.append(f"\nEXPLORATION STATUS:\n{exploration_status}")
+
+        if regression_note:
+            parts.append(f"\nREGRESSION NOTE:\n{regression_note}")
 
         parts.append(
             f"\nJUDGE FEEDBACK (ASI from previous round):\n{asi}"

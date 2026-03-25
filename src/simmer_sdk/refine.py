@@ -46,9 +46,14 @@ def _detect_artifact_type(artifact: str, mode: str) -> str:
     """
     if mode == "from-workspace":
         return "workspace"
-    p = Path(artifact)
-    if p.is_dir():
-        return "workspace"
+    # Only check filesystem if the artifact looks like a path (short, no newlines)
+    if len(artifact) < 260 and "\n" not in artifact:
+        try:
+            p = Path(artifact)
+            if p.is_dir():
+                return "workspace"
+        except OSError:
+            pass
     return "single-file"
 
 
@@ -64,9 +69,14 @@ def _detect_mode(artifact: str, artifact_type: str) -> str:
     if artifact_type == "workspace":
         return "from-workspace"
 
-    p = Path(artifact)
-    if p.is_file():
-        return "from-file"
+    # Only check filesystem if the artifact looks like a path
+    if len(artifact) < 260 and "\n" not in artifact:
+        try:
+            p = Path(artifact)
+            if p.is_file():
+                return "from-file"
+        except OSError:
+            pass
 
     # If it contains newlines or is long, treat as pasted content
     if "\n" in artifact or len(artifact) > 500:
@@ -222,6 +232,7 @@ async def refine(
     )
 
     brief = resolve_brief(brief)
+    original_description = brief.artifact
     problem_class = classify_problem(brief)
 
     out_path = Path(brief.output_dir)
@@ -248,6 +259,7 @@ async def refine(
             iteration=0,
             current_candidate=current_candidate,
             asi="Create an initial high-quality candidate based on the description.",
+            original_description=original_description,
         )
         current_candidate = gen_output.candidate
 
@@ -310,8 +322,13 @@ async def refine(
     for i in range(1, max_iterations + 1):
         # a) Check for regression rollback
         best_idx = find_best(trajectory, brief.primary)
+        regression_note = None
         if trajectory[-1].regressed:
             current_candidate = _load_candidate_at(brief, out_path, trajectory[best_idx].iteration)
+            regression_note = (
+                f"The previous iteration regressed. You are starting from the best version "
+                f"(iteration {trajectory[best_idx].iteration}), not the latest."
+            )
 
         # b) Generator
         exploration_status = track_exploration(trajectory, brief.search_space)
@@ -323,14 +340,23 @@ async def refine(
             asi=trajectory[-1].asi,
             panel_summary=panel_summary,
             exploration_status=exploration_status or None,
+            original_description=original_description,
+            regression_note=regression_note,
         )
-        current_candidate = gen_output.candidate
 
-        # Write candidate
+        # For single-file mode, the generator should have written the candidate
+        # to the output file via the Write tool. Read it back from there.
+        # Fall back to the agent's text output if the file wasn't created.
         if brief.artifact_type == "single-file":
-            (out_path / f"iteration-{i}-candidate.md").write_text(
-                current_candidate, encoding="utf-8"
-            )
+            candidate_file = out_path / f"iteration-{i}-candidate.md"
+            if candidate_file.exists():
+                current_candidate = candidate_file.read_text(encoding="utf-8")
+            else:
+                # Generator didn't write the file — use its output and write it ourselves
+                current_candidate = gen_output.candidate
+                candidate_file.write_text(current_candidate, encoding="utf-8")
+        else:
+            current_candidate = gen_output.candidate
 
         # c) Evaluator
         evaluator_output = _run_evaluator(brief) if brief.evaluator else ""
