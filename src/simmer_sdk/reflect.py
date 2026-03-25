@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from simmer_sdk.types import IterationRecord, StableWins
 
@@ -173,6 +175,79 @@ def track_exploration(
         f"Search space: {search_space}\n"
         f"Tried ({len(tried)}):\n{tried_lines}"
     )
+
+
+def condense_key_change(report: str) -> str:
+    """Condense a generator report to under 60 characters for the trajectory table.
+
+    Matches simmer-reflect/SKILL.md: 'condensed to a few words (under 60 characters).'
+    """
+    if not report or report == "seed":
+        return report
+    # Strip markdown bold markers
+    text = re.sub(r'\*\*', '', report)
+    # Strip common prefixes like "What changed:", "Report:", etc.
+    text = re.sub(r'^(What changed.*?:|Report:?|Summary:?|Changes?:?)\s*', '', text, flags=re.IGNORECASE)
+    # Strip leading newlines and whitespace
+    text = text.strip()
+    # Take first line
+    text = text.split('\n')[0]
+    # Take first sentence
+    text = text.split('. ')[0]
+    # Truncate to 57 chars + "..." if needed
+    if len(text) > 57:
+        text = text[:57] + "..."
+    return text.strip() or "update"
+
+
+def format_trajectory_table(
+    trajectory: list[IterationRecord],
+    criteria_names: list[str],
+    best_idx: int,
+    primary: str | None,
+) -> str:
+    """Produce a markdown table of the iteration trajectory."""
+    # Header
+    headers = ["Iteration"] + criteria_names + ["Composite", "Key Change"]
+    header_line = "| " + " | ".join(headers) + " |"
+    sep_line = "|" + "|".join("-----------" for _ in headers) + "|"
+
+    rows: list[str] = []
+    for rec in trajectory:
+        composite = sum(rec.scores.values()) / len(rec.scores) if rec.scores else 0.0
+        change = rec.key_change
+        if rec.regressed:
+            change = f"{change} [REGRESSION]"
+        cells = [str(rec.iteration)]
+        for c in criteria_names:
+            cells.append(str(rec.scores.get(c, "-")))
+        cells.append(f"{composite:.1f}")
+        cells.append(change)
+        rows.append("| " + " | ".join(cells) + " |")
+
+    best_composite = 0.0
+    if trajectory and best_idx < len(trajectory):
+        best_scores = trajectory[best_idx].scores
+        best_composite = sum(best_scores.values()) / len(best_scores) if best_scores else 0.0
+
+    table_lines = [header_line, sep_line] + rows
+    table_lines.append("")
+    table_lines.append(f"Best candidate: iteration {best_idx} (composite: {best_composite:.1f}/10)")
+
+    return "\n".join(table_lines)
+
+
+def write_trajectory_md(
+    trajectory: list[IterationRecord],
+    criteria_names: list[str],
+    best_idx: int,
+    primary: str | None,
+    output_dir: Path,
+) -> None:
+    """Write trajectory.md to the output directory."""
+    table = format_trajectory_table(trajectory, criteria_names, best_idx, primary)
+    content = f"# Simmer Trajectory\n\n{table}"
+    (output_dir / "trajectory.md").write_text(content, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

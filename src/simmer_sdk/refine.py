@@ -30,6 +30,8 @@ from simmer_sdk.reflect import (
     check_plateau,
     track_stable_wins,
     track_exploration,
+    write_trajectory_md,
+    condense_key_change,
 )
 
 
@@ -258,16 +260,23 @@ async def refine(
             brief=brief,
             iteration=0,
             current_candidate=current_candidate,
-            asi="Create an initial high-quality candidate based on the description.",
+            asi="First iteration — generate initial candidate from the description and criteria.",
             original_description=original_description,
         )
-        current_candidate = gen_output.candidate
-
-    # Write seed candidate
-    if brief.artifact_type == "single-file":
-        (out_path / "iteration-0-candidate.md").write_text(
-            current_candidate, encoding="utf-8"
-        )
+        # Read candidate from file if generator wrote it via Write tool
+        candidate_file = out_path / "iteration-0-candidate.md"
+        if candidate_file.exists():
+            current_candidate = candidate_file.read_text(encoding="utf-8")
+        else:
+            # Fallback: use agent output, write it ourselves
+            current_candidate = gen_output.candidate
+            candidate_file.write_text(current_candidate, encoding="utf-8")
+    else:
+        # Non-seedless: write the existing candidate as seed
+        if brief.artifact_type == "single-file":
+            (out_path / "iteration-0-candidate.md").write_text(
+                current_candidate, encoding="utf-8"
+            )
 
     seed_candidate = current_candidate
 
@@ -308,6 +317,7 @@ async def refine(
         primary=brief.primary,
     )
     trajectory.append(record)
+    write_trajectory_md(trajectory, list(brief.criteria.keys()), find_best(trajectory, brief.primary), brief.primary, out_path)
 
     if judge_result.deliberation_summary:
         panel_summary = judge_result.deliberation_summary
@@ -406,7 +416,7 @@ async def refine(
             )
 
         # e) Reflect
-        key_change = gen_output.report[:200] if gen_output.report else f"iteration-{i}"
+        key_change = condense_key_change(gen_output.report) if gen_output.report else f"iteration-{i}"
 
         record = record_iteration(
             iteration=i,
@@ -418,6 +428,7 @@ async def refine(
             primary=brief.primary,
         )
         trajectory.append(record)
+        write_trajectory_md(trajectory, list(brief.criteria.keys()), find_best(trajectory, brief.primary), brief.primary, out_path)
 
         if judge_result.deliberation_summary:
             panel_summary = judge_result.deliberation_summary

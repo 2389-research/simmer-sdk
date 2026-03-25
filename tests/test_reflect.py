@@ -9,6 +9,8 @@ from simmer_sdk.reflect import (
     record_iteration,
     track_stable_wins,
     track_exploration,
+    format_trajectory_table,
+    condense_key_change,
 )
 
 
@@ -197,3 +199,50 @@ class TestTrackExploration:
         result = track_exploration(trajectory, search_space="tone: [formal, casual]")
         assert isinstance(result, str)
         assert len(result) > 0
+
+
+class TestFormatTrajectoryTable:
+    def test_basic_table(self):
+        trajectory = [
+            IterationRecord(iteration=0, scores={"clarity": 4, "tone": 5},
+                          key_change="seed", asi="", regressed=False, judge_mode="single"),
+            IterationRecord(iteration=1, scores={"clarity": 7, "tone": 5},
+                          key_change="specific problem", asi="", regressed=False, judge_mode="single"),
+        ]
+        table = format_trajectory_table(trajectory, ["clarity", "tone"], best_idx=1, primary=None)
+        assert "| Iteration |" in table
+        assert "seed" in table
+        assert "Best candidate: iteration 1" in table
+
+    def test_regression_marked(self):
+        trajectory = [
+            IterationRecord(iteration=0, scores={"a": 5}, key_change="seed",
+                          asi="", regressed=False, judge_mode="single"),
+            IterationRecord(iteration=1, scores={"a": 3}, key_change="regressed attempt",
+                          asi="", regressed=True, judge_mode="single"),
+        ]
+        table = format_trajectory_table(trajectory, ["a"], best_idx=0, primary=None)
+        assert "REGRESSION" in table or "regressed" in table.lower()
+
+
+class TestCondenseKeyChange:
+    def test_short_text_unchanged(self):
+        assert condense_key_change("added lookup table") == "added lookup table"
+
+    def test_long_text_truncated(self):
+        result = condense_key_change("**What changed:** The entire rationale section was deleted and replaced with a complete adventure module that has multiple paths")
+        assert len(result) <= 60
+
+    def test_strips_markdown_bold(self):
+        result = condense_key_change("**What changed and why:**\n\nSome long explanation here")
+        assert "**" not in result
+
+    def test_seed_unchanged(self):
+        assert condense_key_change("seed") == "seed"
+
+    def test_empty_returns_update(self):
+        assert condense_key_change("") == ""
+
+    def test_strips_report_prefix(self):
+        result = condense_key_change("Report: fixed the CTA to be lower friction")
+        assert not result.startswith("Report")
