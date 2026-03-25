@@ -289,7 +289,7 @@ def build_board_panelist_prompt(
         parts.append("\nFILES YOU SHOULD READ:\n" + "\n".join(files_block))
 
     # Investigation step from the board skill
-    parts.append("""
+    investigation_block = """
 ── STEP 1: INVESTIGATE (required, before scoring) ──
 
 Read the files listed above. Understand the problem before judging it.
@@ -305,7 +305,27 @@ Every iteration:
   the text summary in this prompt
 - When you see a failure pattern you don't know how to fix, SEARCH
   for solutions before proposing your ASI
+"""
 
+    # Creative tasks need structural investigation, not just surface review
+    if problem_class == "text/creative":
+        investigation_block += """
+FOR CREATIVE ARTIFACTS — investigate STRUCTURE, not just surface quality:
+- Does the piece converge or diverge? If every path leads to the same
+  climax, that's a structural weakness in player agency.
+- Are there genuine mid-point decision forks, or just a starting choice
+  followed by a linear sequence?
+- Does the structure create tension BETWEEN threads (competing priorities,
+  time-cost tradeoffs) or only WITHIN them (combat difficulty)?
+- What structural innovations would make this fundamentally more
+  interesting, not just better-polished? Think about interruption events,
+  faction consequences, NPCs who change behavior based on party choices.
+- Surface improvements (better prose, more sensory detail) are less
+  valuable than structural improvements (new decision points, branching
+  consequences, competing objectives).
+"""
+
+    investigation_block += """
 ── STEP 2: SCORE (with full understanding) ──
 
 Score ALL criteria from your lens — not just one. Your lens frames
@@ -314,7 +334,11 @@ HOW you analyze, not WHAT you analyze.
 ── STEP 3: ASI (informed by research) ──
 
 Your ASI candidate must be actionable within the generator's bounds.
-""")
+For creative artifacts, prioritize structural innovation over surface
+polish. "Add a mid-thread fork where the NPC refuses rescue" is more
+valuable than "add more sensory detail to the tavern scene."
+"""
+    parts.append(investigation_block)
 
     # Applicable primitives
     parts.append(f"\nAPPLICABLE PRIMITIVES:\n{primitives_text}")

@@ -211,12 +211,14 @@ async def _dispatch_single_panelist(
     is_workspace = brief.artifact_type == "workspace"
     workspace_path: Optional[str] = brief.artifact if is_workspace else None
 
+    max_turns = 25 if problem_class == "text/creative" else 15
+
     options = ClaudeAgentOptions(
         tools=["Read", "Grep", "Glob"],
         model=brief.judge_model,
         permission_mode="bypassPermissions",
         cwd=workspace_path if is_workspace else brief.output_dir,
-        max_turns=10,
+        max_turns=max_turns,
     )
 
     result_text = ""
@@ -474,9 +476,12 @@ async def dispatch_board(
         stable_wins=stable_wins,
     )
 
+    # Use judge model for synthesis — haiku loses structural nuance when
+    # distilling board deliberation into a single ASI. The synthesis step
+    # needs to preserve the depth of the judges' structural insights.
     client = anthropic.AsyncAnthropic()
     response = await client.messages.create(
-        model=brief.clerk_model,
+        model=brief.judge_model,
         max_tokens=4096,
         messages=[{"role": "user", "content": synthesis_prompt}],
     )

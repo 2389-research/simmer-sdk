@@ -167,12 +167,16 @@ async def dispatch_judge(
         prior_candidate_paths=prior_candidate_paths,
     )
 
+    # Creative tasks need more turns for deep structural investigation.
+    # Code/pipeline tasks need fewer since evaluator output provides structure.
+    max_turns = 25 if problem_class == "text/creative" else 15
+
     options = ClaudeAgentOptions(
         tools=["Read", "Grep", "Glob"],
         model=brief.judge_model,
         permission_mode="bypassPermissions",
         cwd=workspace_path if is_workspace else brief.output_dir,
-        max_turns=10,
+        max_turns=max_turns,
     )
 
     result_text = ""
