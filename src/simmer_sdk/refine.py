@@ -114,24 +114,55 @@ def _load_candidate_at(brief: SetupBrief, out_path: Path, iteration: int) -> str
     return ""
 
 
-def _run_evaluator(brief: SetupBrief) -> str:
-    """Run the evaluator subprocess and return combined stdout+stderr."""
+def _run_evaluator(
+    brief: SetupBrief,
+    candidate_path: str | None = None,
+    iteration: int = 0,
+    output_dir: str | None = None,
+) -> str:
+    """Run the evaluator subprocess and return combined stdout+stderr.
+
+    The evaluator command supports template variables matching the skill's behavior:
+    - ``{candidate_path}`` — absolute path to the current candidate file
+    - ``{output_dir}`` — the simmer output directory
+    - ``{iteration}`` — current iteration number
+
+    For workspace mode, the evaluator runs in the workspace directory (``cd {ARTIFACT}``).
+    For single-file mode, it runs in the output directory so relative paths resolve.
+    """
     if not brief.evaluator:
         return ""
+
+    # Template the evaluator command
+    cmd = brief.evaluator
+    if candidate_path:
+        cmd = cmd.replace("{candidate_path}", candidate_path)
+    if output_dir:
+        cmd = cmd.replace("{output_dir}", output_dir)
+    cmd = cmd.replace("{iteration}", str(iteration))
+
+    # Set cwd: workspace dir for workspace mode, output dir for single-file
+    if brief.artifact_type == "workspace":
+        cwd = brief.artifact
+    else:
+        cwd = output_dir or brief.output_dir
+
     try:
         result = subprocess.run(
-            brief.evaluator,
+            cmd,
             shell=True,
             capture_output=True,
             text=True,
             timeout=3600,
-            cwd=brief.artifact if brief.artifact_type == "workspace" else None,
+            cwd=cwd,
         )
         output_parts = []
         if result.stdout:
             output_parts.append(result.stdout)
         if result.stderr:
             output_parts.append(result.stderr)
+        if result.returncode != 0:
+            output_parts.append(f"EXIT CODE: {result.returncode}")
         return "\n".join(output_parts)
     except subprocess.TimeoutExpired:
         return "EVALUATOR TIMEOUT: command exceeded 3600s"
@@ -298,11 +329,13 @@ async def refine(
 
     seed_candidate = current_candidate
 
-    # Run evaluator on seed if present
-    evaluator_output = _run_evaluator(brief) if brief.evaluator else ""
-
     # Judge the seed
     candidate_path = str(out_path / "iteration-0-candidate.md") if brief.artifact_type == "single-file" else None
+
+    # Run evaluator on seed if present
+    evaluator_output = _run_evaluator(
+        brief, candidate_path=candidate_path, iteration=0, output_dir=str(out_path)
+    ) if brief.evaluator else ""
 
     # Gap Fix 6: Cache board composition before the loop
     cached_board_judges: list[JudgeDefinition] | None = None
@@ -413,7 +446,10 @@ async def refine(
             current_candidate = gen_output.candidate
 
         # c) Evaluator
-        evaluator_output = _run_evaluator(brief) if brief.evaluator else ""
+        candidate_path = str(out_path / f"iteration-{i}-candidate.md") if brief.artifact_type == "single-file" else None
+        evaluator_output = _run_evaluator(
+            brief, candidate_path=candidate_path, iteration=i, output_dir=str(out_path)
+        ) if brief.evaluator else ""
 
         # d) Judge
         # Context discipline: text/creative gets minimal context
