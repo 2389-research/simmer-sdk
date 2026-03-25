@@ -178,9 +178,11 @@ def track_exploration(
 
 
 def condense_key_change(report: str) -> str:
-    """Condense a generator report to under 60 characters for the trajectory table.
+    """Sync fallback: condense a generator report to under 60 characters.
 
-    Matches simmer-reflect/SKILL.md: 'condensed to a few words (under 60 characters).'
+    Used when no LLM is available (e.g., unit tests). For production use,
+    prefer ``condense_key_change_llm`` which uses the clerk model for
+    semantic condensation.
     """
     if not report or report == "seed":
         return report
@@ -188,16 +190,49 @@ def condense_key_change(report: str) -> str:
     text = re.sub(r'\*\*', '', report)
     # Strip common prefixes like "What changed:", "Report:", etc.
     text = re.sub(r'^(What changed.*?:|Report:?|Summary:?|Changes?:?)\s*', '', text, flags=re.IGNORECASE)
-    # Strip leading newlines and whitespace
     text = text.strip()
-    # Take first line
     text = text.split('\n')[0]
-    # Take first sentence
     text = text.split('. ')[0]
-    # Truncate to 57 chars + "..." if needed
     if len(text) > 57:
         text = text[:57] + "..."
     return text.strip() or "update"
+
+
+async def condense_key_change_llm(report: str, model: str = "claude-haiku-4-5") -> str:
+    """Condense a generator report to a meaningful key_change using an LLM.
+
+    The key_change is used in the trajectory table, stable wins tracking,
+    and exploration status — it needs to be semantically meaningful, not
+    just truncated. Uses the clerk model (haiku) for one cheap call.
+
+    Returns under 60 characters capturing WHAT changed, not WHY.
+    Falls back to regex condensation if the LLM call fails.
+    """
+    if not report or report == "seed":
+        return report
+    try:
+        import anthropic
+        client = anthropic.AsyncAnthropic()
+        response = await client.messages.create(
+            model=model,
+            max_tokens=80,
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Condense this generator report into a short key_change label "
+                    "for a trajectory table. Under 50 characters. Capture WHAT changed, "
+                    "not why. No markdown, no quotes. Examples: 'added lookup table', "
+                    "'switched to qwen 27b', 'low-friction CTA', 'dual-clock mechanic'.\n\n"
+                    f"Report:\n{report[:500]}"
+                ),
+            }],
+        )
+        result = response.content[0].text.strip().strip('"\'')
+        if len(result) <= 60 and result:
+            return result
+    except Exception:
+        pass
+    return condense_key_change(report)
 
 
 def format_trajectory_table(

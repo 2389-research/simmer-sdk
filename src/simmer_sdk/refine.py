@@ -31,7 +31,7 @@ from simmer_sdk.reflect import (
     track_stable_wins,
     track_exploration,
     write_trajectory_md,
-    condense_key_change,
+    condense_key_change_llm,
 )
 
 
@@ -416,7 +416,11 @@ async def refine(
             )
 
         # e) Reflect
-        key_change = condense_key_change(gen_output.report) if gen_output.report else f"iteration-{i}"
+        key_change = (
+            await condense_key_change_llm(gen_output.report, model=brief.clerk_model)
+            if gen_output.report
+            else f"iteration-{i}"
+        )
 
         record = record_iteration(
             iteration=i,
