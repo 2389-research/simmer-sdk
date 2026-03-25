@@ -6,6 +6,7 @@ from simmer_sdk.types import (
     SimmerResult,
     StableWins,
 )
+from simmer_sdk.refine import refine
 
 __all__ = [
     "IterationRecord",
@@ -14,4 +15,5 @@ __all__ = [
     "SetupBrief",
     "SimmerResult",
     "StableWins",
+    "refine",
 ]
