@@ -307,6 +307,115 @@ class ReflectOutput:
 
 
 # ---------------------------------------------------------------------------
+# Trajectory table parsing — read scores from the file the agent wrote
+# ---------------------------------------------------------------------------
+
+def _extract_scores_from_trajectory(
+    trajectory_md: str,
+    iteration: int,
+    criteria: dict[str, str],
+) -> dict[str, int]:
+    """Extract scores for a specific iteration from trajectory.md.
+
+    The trajectory table is a well-defined markdown format written by the
+    reflect agent. This is much more reliable than parsing free-text LLM output.
+    """
+    scores: dict[str, int] = {}
+    if not trajectory_md:
+        return scores
+
+    lines = trajectory_md.strip().split("\n")
+    # Find the header row to get column positions
+    header_line = None
+    for line in lines:
+        if "| Iteration" in line or "| Iter" in line:
+            header_line = line
+            break
+    if not header_line:
+        return scores
+
+    headers = [h.strip() for h in header_line.split("|") if h.strip()]
+
+    # Find the row for this iteration
+    for line in lines:
+        cells = [c.strip() for c in line.split("|") if c.strip()]
+        if not cells:
+            continue
+        try:
+            if int(cells[0]) == iteration:
+                for i, header in enumerate(headers):
+                    if i < len(cells):
+                        # Match header to criteria keys
+                        for crit_key in criteria:
+                            if header.lower().replace(" ", "_") == crit_key.lower().replace(" ", "_"):
+                                try:
+                                    scores[crit_key] = int(cells[i])
+                                except (ValueError, IndexError):
+                                    pass
+                break
+        except (ValueError, IndexError):
+            continue
+
+    return scores
+
+
+def _find_best_from_trajectory(
+    trajectory_md: str,
+    criteria: dict[str, str],
+    primary: str | None,
+) -> tuple[int, float]:
+    """Find the best iteration and its composite from trajectory.md.
+
+    Returns (best_iteration, best_composite). Returns (-1, 0.0) if not found.
+    """
+    # Look for "Best candidate: iteration N (composite: N.N/10)"
+    best_match = re.search(
+        r"Best candidate:\s*iteration\s*(\d+)\s*\(composite:\s*([\d.]+)/10\)",
+        trajectory_md,
+        re.IGNORECASE,
+    )
+    if best_match:
+        return int(best_match.group(1)), float(best_match.group(2))
+    return -1, 0.0
+
+
+def _get_primary_from_trajectory(
+    trajectory_md: str,
+    iteration: int,
+    primary: str,
+) -> int | None:
+    """Get the primary criterion score for a specific iteration from trajectory.md."""
+    lines = trajectory_md.strip().split("\n")
+    header_line = None
+    for line in lines:
+        if "| Iteration" in line or "| Iter" in line:
+            header_line = line
+            break
+    if not header_line:
+        return None
+
+    headers = [h.strip() for h in header_line.split("|") if h.strip()]
+    primary_col = None
+    for i, h in enumerate(headers):
+        if h.lower().replace(" ", "_") == primary.lower().replace(" ", "_"):
+            primary_col = i
+            break
+    if primary_col is None:
+        return None
+
+    for line in lines:
+        cells = [c.strip() for c in line.split("|") if c.strip()]
+        if not cells:
+            continue
+        try:
+            if int(cells[0]) == iteration and primary_col < len(cells):
+                return int(cells[primary_col])
+        except (ValueError, IndexError):
+            continue
+    return None
+
+
+# ---------------------------------------------------------------------------
 # LLM-based reflect dispatch
 # ---------------------------------------------------------------------------
 
@@ -453,21 +562,20 @@ async def dispatch_reflect(
     judge_asi: str = "",
     judge_mode: str = "single",
 ) -> ReflectOutput:
-    """Dispatch the reflect step as an LLM call.
+    """Dispatch the reflect step as an Agent SDK subagent.
 
-    Mirrors the reflect subskill: the LLM reads the judge output + trajectory,
-    updates the table, computes composites, detects regression, tracks stable
-    wins, and writes the updated trajectory.md. No regex parsing of scores.
+    The reflect agent has Read + Write + Glob tools — it reads trajectory.md,
+    updates it, and writes it back. Exactly like the skill in Claude Code.
+    No parsing of scores by the orchestrator.
     """
-    import anthropic
+    from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, ResultMessage
 
-    # Read current trajectory.md if it exists
+    # Read current trajectory.md to pass in the prompt
     trajectory_md_path = output_dir / "trajectory.md"
     trajectory_md = ""
     if trajectory_md_path.exists():
         trajectory_md = trajectory_md_path.read_text(encoding="utf-8")
 
-    # Build the reflect prompt
     prompt = _build_reflect_prompt(
         judge_output_text=judge_output_text,
         generator_report=generator_report,
@@ -480,16 +588,23 @@ async def dispatch_reflect(
         search_space=search_space,
     )
 
-    # Dispatch the LLM call
-    client = anthropic.AsyncAnthropic()
-    response = await client.messages.create(
+    # Dispatch as Agent SDK subagent with Read + Write + Glob
+    options = ClaudeAgentOptions(
+        tools=["Read", "Write", "Glob"],
         model=model,
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
+        permission_mode="bypassPermissions",
+        cwd=str(output_dir),
+        max_turns=5,
     )
-    reflect_text = response.content[0].text
 
-    # Parse the structured output
+    reflect_text = ""
+    async with ClaudeSDKClient(options=options) as client:
+        await client.query(prompt)
+        async for message in client.receive_response():
+            if isinstance(message, ResultMessage):
+                reflect_text = message.result if hasattr(message, "result") else str(message)
+
+    # Parse the structured text output for control flow data
     parsed = _parse_reflect_output(
         text=reflect_text,
         iteration=iteration,
@@ -498,10 +613,39 @@ async def dispatch_reflect(
         judge_asi=judge_asi,
     )
 
-    # Build the IterationRecord
-    scores = parsed["scores"]
-    key_change = parsed["key_change"]
+    # Read trajectory.md back — the agent wrote it via Write tool.
+    # This is the source of truth for scores, not the text output.
+    trajectory_table = ""
+    if trajectory_md_path.exists():
+        trajectory_table = trajectory_md_path.read_text(encoding="utf-8")
+
+    # Extract scores from trajectory.md — it's a well-defined markdown table
+    scores = _extract_scores_from_trajectory(trajectory_table, iteration, criteria)
+    # If we got scores from the table, compute composite and best-so-far
+    if scores:
+        composite = round(sum(scores.values()) / len(scores), 1)
+    else:
+        # Fall back to parsed output
+        scores = parsed["scores"]
+        composite = parsed["best_composite"]
+
+    # Determine best-so-far from the trajectory table
+    best_iteration, best_composite = _find_best_from_trajectory(
+        trajectory_table, criteria, primary
+    )
+    # Check regression: is this iteration's composite < best before it?
     regression = parsed["regression"]
+    if scores and best_composite > 0:
+        this_composite = round(sum(scores.values()) / len(scores), 1)
+        if primary and primary in scores:
+            # Check primary first
+            best_primary = _get_primary_from_trajectory(trajectory_table, best_iteration, primary)
+            regression = scores[primary] < best_primary if best_primary is not None else False
+        else:
+            regression = this_composite < best_composite and best_iteration != iteration
+
+    key_change = parsed["key_change"]
+    regression_rollback = best_iteration if regression and best_iteration != iteration else None
 
     record = IterationRecord(
         iteration=iteration,
@@ -512,19 +656,13 @@ async def dispatch_reflect(
         judge_mode=judge_mode,
     )
 
-    # Write updated trajectory.md from LLM output
-    trajectory_table = parsed["trajectory_table"]
-    if trajectory_table:
-        updated_content = f"# Simmer Trajectory\n\n{trajectory_table}"
-        trajectory_md_path.write_text(updated_content, encoding="utf-8")
-
     return ReflectOutput(
         record=record,
-        best_iteration=parsed["best_iteration"],
-        best_composite=parsed["best_composite"],
+        best_iteration=best_iteration if best_iteration >= 0 else parsed["best_iteration"],
+        best_composite=best_composite if best_composite > 0 else parsed["best_composite"],
         regression=regression,
-        regression_rollback_to=parsed["regression_rollback_to"],
-        iterations_remaining=parsed["iterations_remaining"],
+        regression_rollback_to=regression_rollback,
+        iterations_remaining=max_iterations - iteration,
         asi=parsed["asi"],
         exploration_status=parsed["exploration_status"],
         stable_wins=parsed["stable_wins"],

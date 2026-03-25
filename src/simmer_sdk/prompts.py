@@ -558,25 +558,29 @@ def build_reflect_prompt(
     if search_space:
         parts.append(f"\nSEARCH_SPACE: {search_space}")
 
-    parts.append("""
+    parts.append(f"""
 Now perform your reflect duties:
-1. Record the scores in the trajectory table (add a new row)
-2. Compute composite as average of all criterion scores, one decimal
-3. Track best-so-far (primary criterion first if set, composite tiebreaker)
-4. Detect regression (if this iteration scored below best-so-far)
-5. Condense the generator report to a key_change under 60 characters
-6. Track stable wins (what's working, what's not)
-7. Pass the ASI through unchanged
 
-Output the FULL UPDATED trajectory table, then the structured output:
+1. Read trajectory.md from this directory (if it exists). If it does not exist yet, you are creating it.
+2. Extract the scores for EACH criterion from the judge output above. Scores are integers 1-10.
+3. Compute composite = average of all criterion scores, one decimal.
+4. Add a new row to the trajectory table for iteration {iteration}.
+5. Track best-so-far (primary criterion first if set, composite tiebreaker).
+6. Detect regression (is this iteration worse than best-so-far?).
+7. Condense the generator report to a key_change under 60 characters.
+8. Track stable wins (WORKING = non-seed changes that held; NOT WORKING = changes that regressed).
+9. Pass the ASI through unchanged.
 
-UPDATED TRAJECTORY TABLE:
-[full markdown table with all rows including this iteration]
+CRITICAL: You MUST use the Write tool to write the file "trajectory.md" in the current directory.
+The file must contain the FULL trajectory table with ALL iterations including this one.
+Use the exact markdown table format from the skill above. Do NOT skip writing the file.
 
-ITERATION [N] RECORDED
+After writing trajectory.md, report the structured output:
+
+ITERATION {iteration} RECORDED
 BEST SO FAR: iteration [N] (composite: [N.N]/10)
 REGRESSION: [true/false] — [if true: use iteration N as input to next generator]
-ITERATIONS REMAINING: [N]
+ITERATIONS REMAINING: {max_iterations - iteration}
 ASI FOR NEXT ROUND: [the judge's ASI, unchanged]
 EXPLORATION STATUS: [what's been tried vs untried — omit for text/creative or no search space]
 STABLE WINS: [what's working — do not remove]
