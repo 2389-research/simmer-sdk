@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, ResultMessage, TextBlock
 
 from simmer_sdk.prompts import build_generator_prompt
 from simmer_sdk.types import SetupBrief
@@ -103,9 +103,10 @@ async def dispatch_generator(
     )
 
     result_text = ""
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, ResultMessage):
-            result_text = message.result if hasattr(message, "result") else str(message)
-            break
+    async with ClaudeSDKClient(options=options) as client:
+        await client.query(prompt)
+        async for message in client.receive_response():
+            if isinstance(message, ResultMessage):
+                result_text = message.result if hasattr(message, "result") else str(message)
 
     return _parse_generator_output(result_text, brief)

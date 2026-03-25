@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ResultMessage
 
 from simmer_sdk.prompts import build_judge_prompt
 from simmer_sdk.types import JudgeOutput, SetupBrief
@@ -42,8 +42,10 @@ def parse_judge_output(result_text: str, criteria: dict[str, str]) -> JudgeOutpu
     # Patterns for score lines, e.g.:
     #   criterion_name: 7/10 — reasoning here
     #   criterion_name: 7/10
+    #   **criterion_name: 7/10** — reasoning (markdown bold variant)
+    #   - criterion_name: 7/10 (bulleted variant)
     score_pattern = re.compile(
-        r"^\s*([A-Za-z][A-Za-z0-9_ \-]*):\s*(\d+)\s*/\s*10(.*)?$",
+        r"^\s*[-*]*\s*\**([A-Za-z][A-Za-z0-9_ \-]*?)\**:\s*(\d+)\s*/\s*10\**\s*(.*)?$",
         re.MULTILINE,
     )
 
@@ -174,9 +176,10 @@ async def dispatch_judge(
     )
 
     result_text = ""
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, ResultMessage):
-            result_text = message.result if hasattr(message, "result") else str(message)
-            break
+    async with ClaudeSDKClient(options=options) as client:
+        await client.query(prompt)
+        async for message in client.receive_response():
+            if isinstance(message, ResultMessage):
+                result_text = message.result if hasattr(message, "result") else str(message)
 
     return parse_judge_output(result_text, brief.criteria)

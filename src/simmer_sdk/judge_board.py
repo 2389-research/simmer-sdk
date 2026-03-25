@@ -15,7 +15,7 @@ from typing import Optional
 
 import anyio
 import anthropic
-from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ResultMessage
 
 from simmer_sdk.judge import parse_judge_output
 from simmer_sdk.primitives import get_primitives_for_judge
@@ -218,10 +218,11 @@ async def _dispatch_single_panelist(
     )
 
     result_text = ""
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, ResultMessage):
-            result_text = message.result if hasattr(message, "result") else str(message)
-            break
+    async with ClaudeSDKClient(options=options) as client:
+        await client.query(prompt)
+        async for message in client.receive_response():
+            if isinstance(message, ResultMessage):
+                result_text = message.result if hasattr(message, "result") else str(message)
 
     parsed = parse_judge_output(result_text, brief.criteria)
     return judge_def.name, result_text, parsed
