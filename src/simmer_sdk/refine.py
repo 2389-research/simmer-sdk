@@ -114,6 +114,67 @@ def _load_candidate_at(brief: SetupBrief, out_path: Path, iteration: int) -> str
     return ""
 
 
+# ---------------------------------------------------------------------------
+# Git operations for workspace mode
+# ---------------------------------------------------------------------------
+
+
+def _git_run(workspace: str, *args: str) -> subprocess.CompletedProcess:
+    """Run a git command in the workspace directory."""
+    return subprocess.run(
+        ["git"] + list(args),
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def _git_commit_iteration(workspace: str, iteration: int) -> str | None:
+    """Stage all changes and commit. Returns the commit SHA or None on failure."""
+    _git_run(workspace, "add", "-A")
+    result = _git_run(
+        workspace, "commit", "-m", f"simmer: iteration {iteration}",
+        "--allow-empty",
+    )
+    if result.returncode != 0:
+        return None
+    # Get the commit SHA
+    sha_result = _git_run(workspace, "rev-parse", "HEAD")
+    return sha_result.stdout.strip() if sha_result.returncode == 0 else None
+
+
+def _git_rollback_workspace(
+    workspace: str,
+    target_sha: str,
+    output_dir: str,
+) -> None:
+    """Selectively restore workspace files from a previous commit.
+
+    Matches the skill: ``git checkout <best-commit> -- .``
+    but excludes trajectory.md and other tracking files in output_dir.
+    """
+    # Get list of files at the target commit
+    result = _git_run(workspace, "diff", "--name-only", target_sha, "HEAD")
+    if result.returncode != 0:
+        return
+
+    changed_files = [f for f in result.stdout.strip().split("\n") if f.strip()]
+
+    # Exclude tracking files (trajectory.md, etc.) in the output dir
+    output_rel = str(Path(output_dir).relative_to(workspace)) if output_dir.startswith(workspace) else None
+
+    for filepath in changed_files:
+        # Skip tracking files
+        if output_rel and filepath.startswith(output_rel):
+            continue
+        _git_run(workspace, "checkout", target_sha, "--", filepath)
+
+    # Stage the rollback
+    _git_run(workspace, "add", "-A")
+    _git_run(workspace, "commit", "-m", f"simmer: rollback to {target_sha[:8]}", "--allow-empty")
+
+
 def _run_evaluator(
     brief: SetupBrief,
     candidate_path: str | None = None,
@@ -300,6 +361,17 @@ async def refine(
     seed_scores: dict[str, int] | None = None
     current_direction: str = ""
 
+    # Workspace mode: git commit tracking for rollback support
+    # Maps iteration number -> commit SHA
+    iteration_commits: dict[int, str] = {}
+    is_workspace = brief.artifact_type == "workspace"
+
+    if is_workspace:
+        # Snapshot seed state before any changes
+        sha = _git_commit_iteration(brief.artifact, 0)
+        if sha:
+            iteration_commits[0] = sha
+
     # ------------------------------------------------------------------
     # Step 2: Iteration 0 — Judge the seed
     # ------------------------------------------------------------------
@@ -411,7 +483,17 @@ async def refine(
         best_idx = find_best(trajectory, brief.primary)
         regression_note = None
         if trajectory[-1].regressed:
-            current_candidate = _load_candidate_at(brief, out_path, trajectory[best_idx].iteration)
+            if is_workspace:
+                # Workspace: git rollback to best iteration's commit
+                best_iter = trajectory[best_idx].iteration
+                best_sha = iteration_commits.get(best_iter)
+                if best_sha:
+                    _git_rollback_workspace(
+                        brief.artifact, best_sha, str(out_path)
+                    )
+                current_candidate = f"[Workspace at {brief.artifact}]"
+            else:
+                current_candidate = _load_candidate_at(brief, out_path, trajectory[best_idx].iteration)
             regression_note = (
                 f"The previous iteration regressed. You are starting from the best version "
                 f"(iteration {trajectory[best_idx].iteration}), not the latest."
@@ -431,10 +513,15 @@ async def refine(
             regression_note=regression_note,
         )
 
-        # For single-file mode, the generator should have written the candidate
-        # to the output file via the Write tool. Read it back from there.
-        # Fall back to the agent's text output if the file wasn't created.
-        if brief.artifact_type == "single-file":
+        # Capture candidate after generator
+        if is_workspace:
+            # Workspace: generator edited files in place. Commit the changes.
+            sha = _git_commit_iteration(brief.artifact, i)
+            if sha:
+                iteration_commits[i] = sha
+            current_candidate = f"[Workspace at {brief.artifact}]"
+        else:
+            # Single-file: read candidate from file the generator wrote via Write tool.
             candidate_file = out_path / f"iteration-{i}-candidate.md"
             if candidate_file.exists():
                 current_candidate = candidate_file.read_text(encoding="utf-8")
@@ -442,8 +529,6 @@ async def refine(
                 # Generator didn't write the file — use its output and write it ourselves
                 current_candidate = gen_output.candidate
                 candidate_file.write_text(current_candidate, encoding="utf-8")
-        else:
-            current_candidate = gen_output.candidate
 
         # c) Evaluator
         candidate_path = str(out_path / f"iteration-{i}-candidate.md") if brief.artifact_type == "single-file" else None
@@ -558,6 +643,12 @@ async def refine(
     best_candidate = _load_candidate_at(brief, out_path, best_record.iteration)
     if not best_candidate:
         best_candidate = current_candidate
+
+    # Ensure final state matches best iteration
+    if is_workspace:
+        best_sha = iteration_commits.get(best_record.iteration)
+        if best_sha and best_record.iteration != trajectory[-1].iteration:
+            _git_rollback_workspace(brief.artifact, best_sha, str(out_path))
 
     # Write final result
     if brief.artifact_type == "single-file":
