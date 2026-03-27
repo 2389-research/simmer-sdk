@@ -90,6 +90,25 @@ result = await refine(
 )
 ```
 
+### AWS Bedrock
+
+To use AWS Bedrock instead of the direct Anthropic API:
+
+```python
+result = await refine(
+    ...,
+    api_provider="bedrock",
+    aws_access_key="AKIA...",
+    aws_secret_key="...",
+    aws_region="us-east-1",
+    generator_model="claude-sonnet-4-5",  # auto-mapped to Bedrock ID
+    judge_model="claude-sonnet-4-5",
+    clerk_model="claude-haiku-4-5",
+)
+```
+
+Model IDs are auto-mapped (e.g., `claude-sonnet-4-5` becomes `us.anthropic.claude-sonnet-4-5-20250929-v1:0`). You can also pass Bedrock model IDs directly. Requires `boto3` (included as a dependency).
+
 ### Evaluators
 
 The evaluator is a shell command run after each generator step. Its stdout/stderr is passed to the judge as evidence. Supports template variables:
