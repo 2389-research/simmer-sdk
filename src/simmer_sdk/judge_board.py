@@ -115,9 +115,10 @@ async def compose_judges(
         search_space=brief.search_space,
     )
 
-    client = anthropic.AsyncAnthropic()
+    from simmer_sdk.client import create_async_client, map_model_id
+    client = create_async_client(brief)
     response = await client.messages.create(
-        model=brief.clerk_model,
+        model=map_model_id(brief.clerk_model, brief),
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -211,14 +212,16 @@ async def _dispatch_single_panelist(
     is_workspace = brief.artifact_type == "workspace"
     workspace_path: Optional[str] = brief.artifact if is_workspace else None
 
+    from simmer_sdk.client import map_model_id, get_agent_env
     max_turns = 25
 
     options = ClaudeAgentOptions(
         tools=["Read", "Grep", "Glob"],
-        model=brief.judge_model,
+        model=map_model_id(brief.judge_model, brief),
         permission_mode="bypassPermissions",
         cwd=workspace_path if is_workspace else brief.output_dir,
         max_turns=max_turns,
+        env=get_agent_env(brief),
     )
 
     result_text = ""
@@ -242,17 +245,26 @@ async def _deliberate_single(
     judge_name: str,
     own_output: str,
     other_outputs: list[tuple[str, str]],
+    brief: Optional[SetupBrief] = None,
 ) -> tuple[str, str]:
     """Run one judge's deliberation round and return (name, deliberation_text)."""
+    from simmer_sdk.client import create_async_client, map_model_id
     prompt = build_deliberation_prompt(
         judge_name=judge_name,
         own_output=own_output,
         other_outputs=other_outputs,
     )
 
-    client = anthropic.AsyncAnthropic()
+    if brief:
+        client = create_async_client(brief)
+        resolved_model = map_model_id(model, brief)
+    else:
+        import anthropic as _anthropic
+        client = _anthropic.AsyncAnthropic()
+        resolved_model = model
+
     response = await client.messages.create(
-        model=model,
+        model=resolved_model,
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -447,6 +459,7 @@ async def dispatch_board(
                 judge_name=jname,
                 own_output=full_outputs[jname],
                 other_outputs=others,
+                brief=brief,
             )
             delib_results_list.append((name, delib_text))
 
@@ -477,11 +490,11 @@ async def dispatch_board(
     )
 
     # Use judge model for synthesis — haiku loses structural nuance when
-    # distilling board deliberation into a single ASI. The synthesis step
-    # needs to preserve the depth of the judges' structural insights.
-    client = anthropic.AsyncAnthropic()
+    # distilling board deliberation into a single ASI.
+    from simmer_sdk.client import create_async_client, map_model_id
+    client = create_async_client(brief)
     response = await client.messages.create(
-        model=brief.judge_model,
+        model=map_model_id(brief.judge_model, brief),
         max_tokens=4096,
         messages=[{"role": "user", "content": synthesis_prompt}],
     )

@@ -76,6 +76,12 @@ class SetupBrief:
     judge_model: str = "claude-sonnet-4-6"
     clerk_model: str = "claude-haiku-4-5"
 
+    # API provider configuration
+    api_provider: str = "anthropic"  # "anthropic" | "bedrock"
+    aws_access_key: str | None = None
+    aws_secret_key: str | None = None
+    aws_region: str | None = None
+
 
 @dataclass
 class JudgeOutput:

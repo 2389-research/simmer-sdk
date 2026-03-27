@@ -284,6 +284,11 @@ async def refine(
     generator_model: str = "claude-sonnet-4-6",
     judge_model: str = "claude-sonnet-4-6",
     clerk_model: str = "claude-haiku-4-5",
+    # Optional — API provider (Bedrock support)
+    api_provider: str = "anthropic",
+    aws_access_key: str | None = None,
+    aws_secret_key: str | None = None,
+    aws_region: str | None = None,
     # Optional — callbacks
     on_iteration: Callable | None = None,
     on_plateau: Callable | None = None,
@@ -327,6 +332,10 @@ async def refine(
         generator_model=generator_model,
         judge_model=judge_model,
         clerk_model=clerk_model,
+        api_provider=api_provider,
+        aws_access_key=aws_access_key,
+        aws_secret_key=aws_secret_key,
+        aws_region=aws_region,
     )
 
     brief = resolve_brief(brief)
@@ -597,6 +606,7 @@ async def refine(
             model=brief.clerk_model,
             judge_asi=judge_result.asi,
             judge_mode=brief.judge_mode,
+            brief=brief,
         )
 
         record = reflect_output.record

@@ -611,6 +611,7 @@ async def dispatch_reflect(
     model: str = "claude-haiku-4-5",
     judge_asi: str = "",
     judge_mode: str = "single",
+    brief: "SetupBrief | None" = None,
 ) -> ReflectOutput:
     """Dispatch the reflect step as an Agent SDK subagent.
 
@@ -639,12 +640,17 @@ async def dispatch_reflect(
     )
 
     # Dispatch as Agent SDK subagent with Read + Write + Glob
+    from simmer_sdk.client import map_model_id, get_agent_env
+    agent_env = get_agent_env(brief) if brief else {}
+    resolved_model = map_model_id(model, brief) if brief else model
+
     options = ClaudeAgentOptions(
         tools=["Read", "Write", "Glob"],
-        model=model,
+        model=resolved_model,
         permission_mode="bypassPermissions",
         cwd=str(output_dir),
         max_turns=5,
+        env=agent_env,
     )
 
     reflect_text = ""

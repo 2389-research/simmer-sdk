@@ -167,14 +167,16 @@ async def dispatch_judge(
         prior_candidate_paths=prior_candidate_paths,
     )
 
+    from simmer_sdk.client import map_model_id, get_agent_env
     max_turns = 25
 
     options = ClaudeAgentOptions(
         tools=["Read", "Grep", "Glob"],
-        model=brief.judge_model,
+        model=map_model_id(brief.judge_model, brief),
         permission_mode="bypassPermissions",
         cwd=workspace_path if is_workspace else brief.output_dir,
         max_turns=max_turns,
+        env=get_agent_env(brief),
     )
 
     result_text = ""
