@@ -158,12 +158,18 @@ result.output_dir       # Path — where iteration files were written
 ```
 {output_dir}/
   iteration-0-candidate.md     # seed (or seedless first generation)
+  iteration-0-judgment.md      # raw judge output (scores, evidence, improvements per criterion)
   iteration-1-candidate.md     # each improved candidate
+  iteration-1-judgment.md      # raw judge output
   iteration-2-candidate.md
+  iteration-2-judgment.md
   iteration-3-candidate.md
+  iteration-3-judgment.md
   trajectory.md                # running score table
   result.md                    # final best output
 ```
+
+The `iteration-N-judgment.md` files contain per-criterion scores, evidence, and improvement suggestions from the judge. Useful for building UIs that show the judge's reasoning or for downstream agents that extract structured detail.
 
 ## Architecture
 

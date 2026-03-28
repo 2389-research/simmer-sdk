@@ -1,6 +1,6 @@
 [project]
 name = "simmer-sdk"
-version = "0.2.0"
+version = "0.2.1"
 description = "Programmatic simmer iterative refinement loop using the Claude Agent SDK"
 readme = "README.md"
 authors = [
