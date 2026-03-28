@@ -71,6 +71,7 @@ class SetupBrief:
     search_space: str | None = None
     judge_mode: str = "auto"
     judge_panel: list[JudgeDefinition] | None = None
+    judge_count: int = 3
     output_dir: str = "docs/simmer"
     generator_model: str = "claude-sonnet-4-6"
     judge_model: str = "claude-sonnet-4-6"

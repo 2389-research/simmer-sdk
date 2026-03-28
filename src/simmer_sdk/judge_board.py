@@ -113,6 +113,7 @@ async def compose_judges(
         has_evaluator=brief.evaluator is not None,
         background=brief.background,
         search_space=brief.search_space,
+        judge_count=brief.judge_count,
     )
 
     from simmer_sdk.client import create_async_client, map_model_id
@@ -127,14 +128,16 @@ async def compose_judges(
     judges = _parse_judge_panel(text)
 
     # Fallback: if parsing failed, return sensible defaults
-    if len(judges) < 3:
-        judges = [
+    target_count = brief.judge_count if hasattr(brief, 'judge_count') and brief.judge_count else 3
+    if len(judges) < target_count:
+        defaults = [
             JudgeDefinition(name="Analyst", lens="Evaluate correctness and completeness against criteria"),
             JudgeDefinition(name="Pragmatist", lens="Evaluate practical utility and execution quality"),
             JudgeDefinition(name="Critic", lens="Challenge assumptions and find weaknesses"),
         ]
+        judges = defaults[:target_count]
 
-    return judges[:3]
+    return judges[:target_count]
 
 
 # ---------------------------------------------------------------------------

@@ -303,19 +303,11 @@ On iteration 0 (seed):
 Every iteration:
 - Read the candidate file — structure and formatting matter, not just
   the text summary in this prompt
+- Research what experts in this domain consider high-quality work.
+  What are the known patterns, pitfalls, and structural elements that
+  distinguish great from good? Use that as your evaluation framework.
 - When you see a failure pattern you don't know how to fix, SEARCH
   for solutions before proposing your ASI
-"""
-
-    # Creative tasks benefit from domain research before scoring
-    if problem_class == "text/creative":
-        investigation_block += """
-FOR CREATIVE ARTIFACTS — research before scoring:
-- Before scoring, research what experts in this domain consider
-  high-quality work. What are the known patterns, pitfalls, and
-  structural elements that distinguish great from good?
-- Use that as your evaluation framework — not just surface-level
-  observations about prose quality.
 - Structural improvements are more valuable than surface polish.
   Your ASI should target the highest-leverage structural change.
 """
@@ -487,6 +479,7 @@ def build_board_composition_prompt(
     has_evaluator: bool,
     background: Optional[str] = None,
     search_space: Optional[str] = None,
+    judge_count: int = 3,
 ) -> str:
     """Build the prompt to compose a judge panel.
 
@@ -510,7 +503,7 @@ def build_board_composition_prompt(
         parts.append(f"\nSEARCH_SPACE:\n{search_space}")
 
     parts.append("""
-Design 3 judges with diverse lenses for this specific problem. Each judge needs:
+Design {judge_count} judges with diverse lenses for this specific problem. Each judge needs:
 - A unique angle on the problem
 - Relevant primitives from the library
 

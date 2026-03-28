@@ -274,6 +274,7 @@ async def refine(
     # Optional — judge configuration
     judge_mode: str = "auto",
     judge_panel: list[dict] | None = None,
+    judge_count: int = 3,
     # Optional — workspace
     output_dir: str | Path = "docs/simmer",
     background: str | None = None,
@@ -328,6 +329,7 @@ async def refine(
         search_space=search_space,
         judge_mode=judge_mode,
         judge_panel=resolved_judge_panel,
+        judge_count=judge_count,
         output_dir=str(output_dir),
         generator_model=generator_model,
         judge_model=judge_model,
