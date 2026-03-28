@@ -450,6 +450,12 @@ async def refine(
             evaluator_path=evaluator_path,
         )
 
+    # Write raw judge output for downstream consumers
+    if judge_result.raw_text:
+        (out_path / "iteration-0-judgment.md").write_text(
+            judge_result.raw_text, encoding="utf-8"
+        )
+
     seed_scores = judge_result.scores
 
     record = record_iteration(
@@ -590,6 +596,12 @@ async def refine(
                 candidate_path=candidate_path,
                 evaluator_path=evaluator_path,
                 prior_candidate_paths=prior_candidate_paths,
+            )
+
+        # Write raw judge output for downstream consumers
+        if judge_result.raw_text:
+            (out_path / f"iteration-{i}-judgment.md").write_text(
+                judge_result.raw_text, encoding="utf-8"
             )
 
         # e) Reflect — LLM-based reflect mirroring the skill
