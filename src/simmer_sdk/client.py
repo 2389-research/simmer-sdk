@@ -67,6 +67,10 @@ def get_agent_env(brief: SetupBrief) -> dict[str, str]:
         return {}
     env = {
         "CLAUDE_CODE_USE_BEDROCK": "1",
+        # The Claude Code CLI requires ANTHROPIC_API_KEY to be set even in
+        # Bedrock mode (for initial auth handshake). A dummy value works —
+        # actual API calls go through Bedrock via AWS credentials.
+        "ANTHROPIC_API_KEY": "bedrock-mode-no-key-needed",
     }
     if brief.aws_region:
         env["AWS_REGION"] = brief.aws_region
