@@ -10,7 +10,7 @@ uv add simmer-sdk
 pip install simmer-sdk
 ```
 
-Requires `ANTHROPIC_API_KEY` set in your environment.
+Requires `ANTHROPIC_API_KEY` set in your environment, or AWS credentials for Bedrock mode.
 
 ## Usage
 
@@ -72,6 +72,7 @@ VALIDATION_COMMAND-> validation_command # quick check command
 SEARCH_SPACE      -> search_space     # what's in scope to explore
 JUDGE_MODE        -> judge_mode       # "auto", "single", "board"
 JUDGE_PANEL       -> judge_panel      # custom judge definitions [{name, lens}]
+JUDGE_COUNT       -> judge_count      # number of judges on the board (default 3, min 2)
 ITERATIONS        -> iterations       # number of generate-judge-reflect cycles (default 3)
 MODE              -> mode             # "auto", "seedless", "from-file", "from-paste", "from-workspace"
 OUTPUT_DIR        -> output_dir       # where iteration files go (default "docs/simmer")
@@ -179,7 +180,7 @@ The `iteration-N-judgment.md` files contain per-criterion scores, evidence, and 
 |------|---------------|-------|
 | Generator | Agent SDK subagent | Read, Edit, Write, Bash, Glob, Grep |
 | Judge (single) | Agent SDK subagent | Read, Grep, Glob |
-| Judge (board, 3x) | 3 Agent SDK subagents in parallel | Read, Grep, Glob |
+| Judge (board) | N Agent SDK subagents in parallel (default 3, configurable) | Read, Grep, Glob |
 | Reflect | Agent SDK subagent | Read, Write, Glob |
 | Evaluator | subprocess.run() | (user-provided command) |
 | Clerk (synthesis) | anthropic messages.create() | (no tools) |
