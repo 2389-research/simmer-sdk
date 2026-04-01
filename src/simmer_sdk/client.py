@@ -57,6 +57,18 @@ def map_model_id(model: str, brief: SetupBrief) -> str:
     return BEDROCK_MODEL_MAP.get(model, model)
 
 
+def get_cli_path() -> str | None:
+    """Get the path to the system-installed Claude CLI if available.
+
+    The bundled CLI in claude-agent-sdk v0.1.53 (CLI v2.1.88) has a broken
+    subprocess transport protocol. The system-installed CLI works correctly.
+    Returns None if not found, which makes ClaudeAgentOptions fall back
+    to the bundled binary.
+    """
+    import shutil
+    return shutil.which("claude")
+
+
 def get_agent_env(brief: SetupBrief) -> dict[str, str]:
     """Get environment variables for ClaudeSDKClient (Agent SDK) calls.
 

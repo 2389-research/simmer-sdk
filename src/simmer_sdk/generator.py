@@ -98,7 +98,7 @@ async def dispatch_generator(
     else:
         tools = ["Read", "Write", "Glob"]
 
-    from simmer_sdk.client import map_model_id, get_agent_env
+    from simmer_sdk.client import map_model_id, get_agent_env, get_cli_path
     options = ClaudeAgentOptions(
         tools=tools,
         model=map_model_id(brief.generator_model, brief),
@@ -106,6 +106,7 @@ async def dispatch_generator(
         cwd=workspace_path if is_workspace else brief.output_dir,
         max_turns=20,
         env=get_agent_env(brief),
+        cli_path=get_cli_path(),
     )
 
     result_text = ""

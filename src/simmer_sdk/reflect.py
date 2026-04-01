@@ -640,7 +640,7 @@ async def dispatch_reflect(
     )
 
     # Dispatch as Agent SDK subagent with Read + Write + Glob
-    from simmer_sdk.client import map_model_id, get_agent_env
+    from simmer_sdk.client import map_model_id, get_agent_env, get_cli_path
     agent_env = get_agent_env(brief) if brief else {}
     resolved_model = map_model_id(model, brief) if brief else model
 
@@ -651,6 +651,7 @@ async def dispatch_reflect(
         cwd=str(output_dir),
         max_turns=5,
         env=agent_env,
+        cli_path=get_cli_path(),
     )
 
     reflect_text = ""
