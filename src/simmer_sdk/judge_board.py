@@ -510,9 +510,24 @@ async def dispatch_board(
     # Don't re-parse from synthesis text which is fragile.
     final_scores = consensus
 
+    # Build raw_text with the consensus scores stamped clearly at the top.
+    # The reflect agent reads this to update trajectory.md — if the synthesis
+    # text buries the scores or references seed scores, the reflect agent
+    # extracts the wrong numbers. Stamping the consensus scores ensures they
+    # are unambiguous.
+    scores_block = "\n".join(f"  {k}: {v}/10" for k, v in final_scores.items())
+    consensus_composite = round(sum(final_scores.values()) / len(final_scores), 1) if final_scores else 0.0
+    stamped_raw_text = (
+        f"BOARD CONSENSUS SCORES (post-deliberation):\n"
+        f"{scores_block}\n"
+        f"COMPOSITE: {consensus_composite}/10\n\n"
+        f"ASI (highest-leverage direction):\n{asi}\n\n"
+        f"--- FULL SYNTHESIS ---\n{synthesis_text}"
+    )
+
     return JudgeOutput(
         scores=final_scores,
         asi=asi,
         deliberation_summary=deliberation_summary or None,
-        raw_text=synthesis_text,
+        raw_text=stamped_raw_text,
     )
