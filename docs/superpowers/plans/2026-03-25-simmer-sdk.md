@@ -2080,7 +2080,7 @@ Expected: All unit tests PASS
 
 - [ ] **Step 4: Run integration test**
 
-Run: `ANTHROPIC_API_KEY=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 uv run pytest tests/test_integration.py -v -m integration -s`
+Run: `ANTHROPIC_API_KEY=... uv run pytest tests/test_integration.py -v -m integration -s`
 Expected: Both tests PASS, trajectory printed to console
 
 - [ ] **Step 5: Commit**
