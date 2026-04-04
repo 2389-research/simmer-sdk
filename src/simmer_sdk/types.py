@@ -78,10 +78,11 @@ class SetupBrief:
     clerk_model: str = "claude-haiku-4-5"
 
     # API provider configuration
-    api_provider: str = "anthropic"  # "anthropic" | "bedrock"
+    api_provider: str = "anthropic"  # "anthropic" | "bedrock" | "ollama"
     aws_access_key: str | None = None
     aws_secret_key: str | None = None
     aws_region: str | None = None
+    ollama_url: str = "http://localhost:11434"
 
 
 @dataclass

@@ -10,7 +10,7 @@ uv add simmer-sdk
 pip install simmer-sdk
 ```
 
-Requires `ANTHROPIC_API_KEY` set in your environment, or AWS credentials for Bedrock mode.
+Requires `ANTHROPIC_API_KEY` set in your environment, AWS credentials for Bedrock mode, or a running Ollama instance for local models.
 
 ## Usage
 
@@ -109,6 +109,32 @@ result = await refine(
 ```
 
 Model IDs are auto-mapped (e.g., `claude-sonnet-4-5` becomes `us.anthropic.claude-sonnet-4-5-20250929-v1:0`). You can also pass Bedrock model IDs directly. Requires `boto3` (included as a dependency).
+
+### Ollama (Local Models)
+
+To run the full simmer pipeline against local models via Ollama:
+
+```python
+result = await refine(
+    ...,
+    api_provider="ollama",
+    ollama_url="http://localhost:11434",  # default
+    generator_model="qwen3:32b",
+    judge_model="qwen3:32b",
+    clerk_model="qwen3.5:9b",
+)
+```
+
+No `ANTHROPIC_API_KEY` required. Ollama exposes an Anthropic-compatible `/v1/messages` endpoint, so the full pipeline (generator agents, judge board, deliberation, synthesis) works without code changes.
+
+**Requirements:**
+- [Ollama](https://ollama.com) running locally or on a network host
+- Models pulled before use: `ollama pull qwen3:32b`
+- Claude CLI installed (for judge agents): `npm install -g @anthropic-ai/claude-code`
+
+**Tested models:** `qwen3:32b`, `qwen3.5:27b`, `qwen3.5:9b`, `gemma3:27b`, `llama4:16x17b`. Any Ollama model tag works — pass it directly as the model ID.
+
+**Docker Compose:** When running in containers, set `ollama_url` to the service name (e.g., `http://ollama:11434`). The judge board agents inherit the URL via `ANTHROPIC_BASE_URL` environment variable.
 
 ### Evaluators
 

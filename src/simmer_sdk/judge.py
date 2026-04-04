@@ -167,6 +167,21 @@ async def dispatch_judge(
         prior_candidate_paths=prior_candidate_paths,
     )
 
+    # Local mode: use Ollama agent loop instead of Claude CLI
+    if brief.api_provider == "ollama":
+        from simmer_sdk.local_agent import run_local_agent
+        result_text = await run_local_agent(
+            prompt=prompt,
+            model=brief.judge_model,
+            ollama_url=brief.ollama_url,
+            tools=["Read", "Grep", "Glob"],
+            cwd=workspace_path if is_workspace else brief.output_dir,
+            max_turns=25,
+        )
+        output = parse_judge_output(result_text, brief.criteria)
+        output.raw_text = result_text
+        return output
+
     from simmer_sdk.client import map_model_id, get_agent_env, get_cli_path
     max_turns = 25
 

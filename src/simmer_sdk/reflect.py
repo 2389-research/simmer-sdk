@@ -227,7 +227,8 @@ async def condense_key_change_llm(report: str, model: str = "claude-haiku-4-5") 
                 ),
             }],
         )
-        result = response.content[0].text.strip().strip('"\'')
+        from simmer_sdk.client import extract_text
+        result = extract_text(response).strip().strip('"\'')
         if len(result) <= 60 and result:
             return result
     except Exception:
@@ -639,27 +640,39 @@ async def dispatch_reflect(
         search_space=search_space,
     )
 
-    # Dispatch as Agent SDK subagent with Read + Write + Glob
-    from simmer_sdk.client import map_model_id, get_agent_env, get_cli_path
-    agent_env = get_agent_env(brief) if brief else {}
-    resolved_model = map_model_id(model, brief) if brief else model
+    # Local mode: use Ollama agent loop instead of Claude CLI
+    if brief and brief.api_provider == "ollama":
+        from simmer_sdk.local_agent import run_local_agent
+        reflect_text = await run_local_agent(
+            prompt=prompt,
+            model=brief.clerk_model,
+            ollama_url=brief.ollama_url,
+            tools=["Read", "Write", "Glob"],
+            cwd=str(output_dir),
+            max_turns=5,
+        )
+    else:
+        # Dispatch as Agent SDK subagent with Read + Write + Glob
+        from simmer_sdk.client import map_model_id, get_agent_env, get_cli_path
+        agent_env = get_agent_env(brief) if brief else {}
+        resolved_model = map_model_id(model, brief) if brief else model
 
-    options = ClaudeAgentOptions(
-        tools=["Read", "Write", "Glob"],
-        model=resolved_model,
-        permission_mode="bypassPermissions",
-        cwd=str(output_dir),
-        max_turns=5,
-        env=agent_env,
-        cli_path=get_cli_path(),
-    )
+        options = ClaudeAgentOptions(
+            tools=["Read", "Write", "Glob"],
+            model=resolved_model,
+            permission_mode="bypassPermissions",
+            cwd=str(output_dir),
+            max_turns=5,
+            env=agent_env,
+            cli_path=get_cli_path(),
+        )
 
-    reflect_text = ""
-    async with ClaudeSDKClient(options=options) as client:
-        await client.query(prompt)
-        async for message in client.receive_response():
-            if isinstance(message, ResultMessage):
-                reflect_text = (message.result or "") if hasattr(message, "result") else str(message)
+        reflect_text = ""
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(prompt)
+            async for message in client.receive_response():
+                if isinstance(message, ResultMessage):
+                    reflect_text = (message.result or "") if hasattr(message, "result") else str(message)
 
     # Ensure reflect_text is a string
     if not reflect_text:
