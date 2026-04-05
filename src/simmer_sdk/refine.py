@@ -6,7 +6,6 @@ setup -> seed judgment -> iterate (generate -> evaluate -> judge -> reflect) -> 
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import re
 import shlex
@@ -37,7 +36,6 @@ from simmer_sdk.reflect import (
     track_exploration,
     write_trajectory_md,
     format_trajectory_table,
-    condense_key_change_llm,
     dispatch_reflect,
 )
 
@@ -213,11 +211,12 @@ async def _run_evaluator(
 
     try:
         import anyio
-        result = await anyio.run_process(
-            ["sh", "-c", cmd],
-            cwd=cwd,
-            check=False,
-        )
+        with anyio.fail_after(3600):
+            result = await anyio.run_process(
+                ["sh", "-c", cmd],
+                cwd=cwd,
+                check=False,
+            )
         output_parts = []
         stdout = result.stdout.decode() if result.stdout else ""
         stderr = result.stderr.decode() if result.stderr else ""
@@ -228,6 +227,8 @@ async def _run_evaluator(
         if result.returncode != 0:
             output_parts.append(f"EXIT CODE: {result.returncode}")
         return "\n".join(output_parts)
+    except TimeoutError:
+        return "EVALUATOR TIMEOUT: command exceeded 3600s"
     except Exception as e:
         return f"EVALUATOR ERROR: {e}"
 

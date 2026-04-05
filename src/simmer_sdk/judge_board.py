@@ -128,7 +128,7 @@ async def compose_judges(
     judges = _parse_judge_panel(text)
 
     # Fallback: if parsing failed, return sensible defaults
-    target_count = brief.judge_count if hasattr(brief, 'judge_count') and brief.judge_count else 3
+    target_count = brief.judge_count or 3
     if len(judges) < target_count:
         defaults = [
             JudgeDefinition(name="Analyst", lens="Evaluate correctness and completeness against criteria"),
