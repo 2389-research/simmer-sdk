@@ -83,6 +83,7 @@ class SetupBrief:
     aws_secret_key: str | None = None
     aws_region: str | None = None
     ollama_url: str = "http://localhost:11434"
+    judge_preamble: str | None = None  # Optional preamble injected into judge prompts
 
 
 @dataclass

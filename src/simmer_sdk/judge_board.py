@@ -190,6 +190,12 @@ async def _dispatch_single_panelist(
         custom_primitives=judge_def.primitives if judge_def.primitives else None,
     )
 
+    # Resolve judge preamble: use explicit value, or local default for ollama
+    preamble = brief.judge_preamble
+    if preamble is None and brief.api_provider == "ollama":
+        from simmer_sdk.prompts import LOCAL_JUDGE_PREAMBLE
+        preamble = LOCAL_JUDGE_PREAMBLE
+
     prompt = build_board_panelist_prompt(
         judge_def=judge_def,
         iteration=iteration,
@@ -211,6 +217,7 @@ async def _dispatch_single_panelist(
         evaluator_path=evaluator_path,
         prior_candidate_paths=prior_candidate_paths,
         output_contract=output_contract,
+        judge_preamble=preamble,
     )
 
     is_workspace = brief.artifact_type == "workspace"
