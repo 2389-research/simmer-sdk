@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable, Union
 
 
 @dataclass
@@ -101,3 +103,21 @@ class JudgeOutput:
         if not self.scores:
             return 0.0
         return round(sum(self.scores.values()) / len(self.scores), 1)
+
+
+# ---------------------------------------------------------------------------
+# Callback type aliases
+# ---------------------------------------------------------------------------
+
+# Called after each iteration with (record, trajectory, trajectory_table).
+OnIterationCallback = Callable[
+    ["IterationRecord", list["IterationRecord"], str],
+    Union[None, Awaitable[None]],
+]
+
+# Called when a plateau is detected with (trajectory,). Return True to upgrade
+# judge_mode to "board" and extend the run by 2 iterations.
+OnPlateauCallback = Callable[
+    [list["IterationRecord"]],
+    Union[bool, Awaitable[bool]],
+]

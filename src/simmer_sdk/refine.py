@@ -18,6 +18,8 @@ from simmer_sdk.types import (
     IterationRecord,
     JudgeDefinition,
     JudgeOutput,
+    OnIterationCallback,
+    OnPlateauCallback,
     SetupBrief,
     SimmerResult,
     StableWins,
@@ -292,8 +294,8 @@ async def refine(
     aws_secret_key: str | None = None,
     aws_region: str | None = None,
     # Optional — callbacks
-    on_iteration: Callable | None = None,
-    on_plateau: Callable | None = None,
+    on_iteration: OnIterationCallback | None = None,
+    on_plateau: OnPlateauCallback | None = None,
 ) -> SimmerResult:
     """Public entry point for the Simmer refinement loop.
 

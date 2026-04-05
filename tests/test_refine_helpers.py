@@ -7,7 +7,7 @@ import shlex
 
 import pytest
 
-from simmer_sdk.refine import _detect_artifact_type, _detect_mode, refine
+from simmer_sdk.refine import _call_callback, _detect_artifact_type, _detect_mode, refine
 
 
 # ---------------------------------------------------------------------------
@@ -171,3 +171,54 @@ class TestRefineInputValidation:
             assert "iterations" not in str(exc), "iterations=0 should pass validation"
         except Exception:
             pass  # API errors or other errors are fine here
+
+
+# ---------------------------------------------------------------------------
+# _call_callback
+# ---------------------------------------------------------------------------
+
+
+class TestCallCallback:
+    """Verify _call_callback dispatches sync, async, and None correctly."""
+
+    async def test_none_callback_returns_none(self):
+        result = await _call_callback(None, "arg1", "arg2")
+        assert result is None
+
+    async def test_sync_callback_is_called_with_args(self):
+        received = []
+
+        def sync_cb(*args):
+            received.extend(args)
+            return "sync_result"
+
+        result = await _call_callback(sync_cb, "a", "b")
+        assert result == "sync_result"
+        assert received == ["a", "b"]
+
+    async def test_async_callback_is_awaited(self):
+        received = []
+
+        async def async_cb(*args):
+            received.extend(args)
+            return "async_result"
+
+        result = await _call_callback(async_cb, "x", "y")
+        assert result == "async_result"
+        assert received == ["x", "y"]
+
+    async def test_sync_callback_returning_none(self):
+        def noop(*args):
+            pass
+
+        result = await _call_callback(noop, "ignored")
+        assert result is None
+
+    async def test_async_callback_returning_true(self):
+        """Mirrors on_plateau usage — async callback returning bool."""
+
+        async def plateau_cb(trajectory):
+            return True
+
+        result = await _call_callback(plateau_cb, [])
+        assert result is True
