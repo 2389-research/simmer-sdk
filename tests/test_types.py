@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -115,3 +116,17 @@ def test_stable_wins_defaults():
     assert sw.working == []
     assert sw.not_working == []
     assert sw.direction == ""
+
+
+def test_iteration_record_composite_in_asdict():
+    record = IterationRecord(
+        iteration=0,
+        scores={"a": 7, "b": 9},
+        key_change="seed",
+        asi="improve",
+        regressed=False,
+        judge_mode="single",
+    )
+    d = asdict(record)
+    assert "composite" in d
+    assert d["composite"] == 8.0

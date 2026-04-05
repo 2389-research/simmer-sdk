@@ -16,12 +16,13 @@ class IterationRecord:
     asi: str
     regressed: bool
     judge_mode: str
+    composite: float = field(init=False)
 
-    @property
-    def composite(self) -> float:
-        if not self.scores:
-            return 0.0
-        return round(sum(self.scores.values()) / len(self.scores), 1)
+    def __post_init__(self):
+        if self.scores:
+            self.composite = round(sum(self.scores.values()) / len(self.scores), 1)
+        else:
+            self.composite = 0.0
 
 
 @dataclass
