@@ -50,7 +50,9 @@ The fix: break each step into its own call where the model does ONE thing.
 | `gemma4:26b` | 26B MoE | 4B | 17GB | Judging (with evidence), generation, synthesis |
 | `gemma4:e4b` | 8B dense | 4B | 9.6GB | Extraction, instruction following |
 
-**Key finding:** For extraction, smaller dense models (e4b) outperform larger MoE (26b). Dense params follow structured prompts more reliably. The 26b MoE returned 0 entities for 5/10 docs; the e4b extracted from all 10.
+**Key finding:** For extraction, smaller dense models (e4b) outperform larger MoE (26b). Dense params follow structured prompts more reliably.
+
+*Note: Results in this guide were produced during development with 10 documents from the Noospheric Orrery test corpus. The test fixtures in `tests/fixtures/sample_docs/` provide 5 synthetic documents for reproducible testing.*
 
 ## Model Parameters
 

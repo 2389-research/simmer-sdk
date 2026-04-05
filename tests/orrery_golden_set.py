@@ -177,7 +177,7 @@ async def run_golden_set(
     print(f"{'='*60}")
     print(f"Best: iteration {result.best_iteration} ({result.composite}/10)")
     print(f"Scores: {result.best_scores}")
-    print(f"\nTrajectory:")
+    print("\nTrajectory:")
     for r in result.trajectory:
         print(f"  iter {r.iteration}: {r.composite} — {r.key_change}")
 

@@ -151,11 +151,11 @@ def parse_scores(judge_text: str) -> dict:
     """Extract scores from judge output."""
     import re
     scores = {}
-    for match in re.finditer(r"(coverage|precision|taxonomy_quality):\s*(\d+)/10", judge_text, re.IGNORECASE):
+    for match in re.finditer(r"\*{0,2}(coverage|precision|taxonomy_quality)\*{0,2}:\s*(\d+)/10", judge_text, re.IGNORECASE):
         scores[match.group(1).lower()] = int(match.group(2))
 
     composite = 0.0
-    comp_match = re.search(r"COMPOSITE:\s*([\d.]+)/10", judge_text, re.IGNORECASE)
+    comp_match = re.search(r"COMPOSITE:\s*\*{0,2}([\d.]+)/10", judge_text, re.IGNORECASE)
     if comp_match:
         composite = float(comp_match.group(1))
     elif scores:
