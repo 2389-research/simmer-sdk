@@ -18,6 +18,7 @@ Usage:
 
 import asyncio
 import json
+import os
 import re
 import shutil
 from datetime import datetime
@@ -36,18 +37,13 @@ OLLAMA_URL = "http://localhost:11434"
 PHASE1_ITERATIONS = 3
 PHASE2_ITERATIONS = 3
 
-ORRERY_TEST_DOCS = Path("/Users/michaelsugimura/Documents/GitHub/Noospheric-Orrery/test_docs")
+FIXTURE_DOCS = Path(__file__).parent / "fixtures" / "sample_docs"
 SAMPLE_DOCS = [
-    "2024-04-05-Initial Betaworks meeting.md",
-    "2024-04-08-Jordan from Betaworks.md",
-    "2024-04-10-Adhoc Meet with James Cham.md",
-    "2024-05-09-Meeting with Paul Hunkin (jsonify).md",
-    "2024-06-14-Harper - Nate.md",
-    "2024-12-18-Knowledge Graph Hacking.md",
-    "2025-07-16-Applying Organization Theory to Specialized Agents.md",
-    "2025-09-08-Justin McCarthy.md",
-    "2026-01-23-Harper Reed and Joseph Turian.md",
-    "2026-02-26 Future Business Strategies and Our Edge.md",
+    "2024-04-05-Initial-Meeting.md",
+    "2024-05-09-Product-Demo.md",
+    "2024-06-14-Strategy-Sync.md",
+    "2024-12-18-Knowledge-Graph-Design.md",
+    "2025-07-16-Agent-Architecture.md",
 ]
 
 # Orrery-matching seed
@@ -407,7 +403,7 @@ async def main():
     samples_dir = output_dir / "samples"
     samples_dir.mkdir(exist_ok=True)
     for doc_name in SAMPLE_DOCS:
-        src = ORRERY_TEST_DOCS / doc_name
+        src = FIXTURE_DOCS / doc_name
         if src.exists():
             shutil.copy(src, samples_dir / doc_name)
 

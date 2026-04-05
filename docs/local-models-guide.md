@@ -13,17 +13,22 @@ ollama pull gemma4:e4b   # 8B dense — extraction
 ```
 
 ```python
+import anyio
 from simmer_sdk import refine
 
-result = await refine(
-    artifact="A one-shot DND adventure hook...",
-    criteria={"tension": "escalating stakes", "agency": "player choices matter"},
-    api_provider="ollama",
-    generator_model="gemma4:26b",
-    judge_model="gemma4:26b",
-    clerk_model="gemma4:26b",
-    iterations=3,
-)
+async def main():
+    result = await refine(
+        artifact="A one-shot DND adventure hook...",
+        criteria={"tension": "escalating stakes", "agency": "player choices matter"},
+        api_provider="ollama",
+        generator_model="gemma4:26b",
+        judge_model="gemma4:26b",
+        clerk_model="gemma4:26b",
+        iterations=3,
+    )
+    print(result.best_candidate)
+
+anyio.run(main)
 ```
 
 For **corpus-based tasks** (entity extraction, spec refinement), the standard `refine()` loop isn't enough — local models need the workflow decomposed. The rest of this guide shows how.
@@ -120,6 +125,8 @@ all_extractions = []
 for doc_path in sample_docs:
     content = doc_path.read_text()[:3000]
     result = await call_model(client, "gemma4:26b", system, prompt.format(doc_content=content))
+    # Note: 26B is fine for open extraction (discovery). For executing specs in Phase 2,
+    # use e4b — see "Decisions and Why" section.
     all_extractions.append(f"=== {doc_path.name} ===\n{result}")
 
 evidence_base = "\n\n".join(all_extractions)
@@ -382,7 +389,9 @@ The raw per-doc extractions total ~50KB across 10 docs. That's too large to pass
 | Phase | Model(s) | Best Score | Entities |
 |-------|----------|-----------|----------|
 | Phase 1 golden set | 26b all | 8.8/10 | 49 reference entities |
-| Phase 2 spec | 26b judge + e4b extract | 7.3/10 | 23% precision, 106% recall |
+| Phase 2 spec | 26b judge + e4b extract | 7.3/10 | 23% precision, 52 hits / 49 golden entities |
+
+*Note: Recall >100% occurs because the same golden entity can be matched in multiple documents. The evaluator currently scores against the full corpus golden set per document rather than per-doc golden sets. This is a known simplification — see `tests/evaluate_spec.py` for details.*
 
 ## Files
 

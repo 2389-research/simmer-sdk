@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from datetime import datetime
@@ -76,19 +77,14 @@ JUDGE_PANEL = [
 # Orrery uses: SELECT ... ORDER BY RANDOM() LIMIT 10
 # We use a fixed set for reproducibility across runs.
 SAMPLE_DOCS = [
-    "2024-04-05-Initial Betaworks meeting.md",
-    "2024-04-08-Jordan from Betaworks.md",
-    "2024-04-10-Adhoc Meet with James Cham.md",
-    "2024-05-09-Meeting with Paul Hunkin (jsonify).md",
-    "2024-06-14-Harper - Nate.md",
-    "2024-12-18-Knowledge Graph Hacking.md",
-    "2025-07-16-Applying Organization Theory to Specialized Agents.md",
-    "2025-09-08-Justin McCarthy.md",
-    "2026-01-23-Harper Reed and Joseph Turian.md",
-    "2026-02-26 Future Business Strategies and Our Edge.md",
+    "2024-04-05-Initial-Meeting.md",
+    "2024-05-09-Product-Demo.md",
+    "2024-06-14-Strategy-Sync.md",
+    "2024-12-18-Knowledge-Graph-Design.md",
+    "2025-07-16-Agent-Architecture.md",
 ]
 
-ORRERY_TEST_DOCS = Path("/Users/michaelsugimura/Documents/GitHub/Noospheric-Orrery/test_docs")
+FIXTURE_DOCS = Path(__file__).parent / "fixtures" / "sample_docs"
 
 
 def setup_samples(output_dir: Path) -> Path:
@@ -98,7 +94,7 @@ def setup_samples(output_dir: Path) -> Path:
 
     found = 0
     for doc_name in SAMPLE_DOCS:
-        src = ORRERY_TEST_DOCS / doc_name
+        src = FIXTURE_DOCS / doc_name
         if src.exists():
             # Orrery uses doc ID as filename; we use the original name
             shutil.copy(src, sample_dir / doc_name)
