@@ -1,4 +1,12 @@
-from simmer_sdk.prompts import build_board_composition_prompt
+# ABOUTME: Tests for prompts.py — helper functions and build_board_composition_prompt.
+# ABOUTME: Covers _format_criteria, _format_scores, _optional_block, and prompt builder tests.
+
+from simmer_sdk.prompts import (
+    _format_criteria,
+    _format_scores,
+    _optional_block,
+    build_board_composition_prompt,
+)
 
 
 class TestBuildBoardCompositionPrompt:
@@ -61,3 +69,132 @@ class TestBuildBoardCompositionPrompt:
         assert name_entry_count == 5, (
             f"Expected 5 judge entries in output format tail, got {name_entry_count}"
         )
+
+
+# ---------------------------------------------------------------------------
+# _format_criteria
+# ---------------------------------------------------------------------------
+
+
+class TestFormatCriteria:
+    """Tests for the _format_criteria helper."""
+
+    def test_keys_present_in_output(self):
+        """All criterion names must appear in the formatted string."""
+        result = _format_criteria({"clarity": "Is it clear?", "depth": "Has depth?"})
+        assert "clarity" in result
+        assert "depth" in result
+
+    def test_values_present_in_output(self):
+        """All criterion descriptions must appear in the formatted string."""
+        result = _format_criteria({"clarity": "Is it clear?", "depth": "Has depth?"})
+        assert "Is it clear?" in result
+        assert "Has depth?" in result
+
+    def test_single_criterion_formats_correctly(self):
+        """A single-entry dict should produce exactly one bullet line."""
+        result = _format_criteria({"style": "Is it stylish?"})
+        assert "style" in result
+        assert "Is it stylish?" in result
+        # Exactly one bullet
+        assert result.count("  - ") == 1
+
+    def test_multiple_criteria_produce_multiple_lines(self):
+        """Multiple criteria should produce one line each."""
+        result = _format_criteria({"a": "desc_a", "b": "desc_b", "c": "desc_c"})
+        lines = result.strip().split("\n")
+        assert len(lines) == 3
+
+    def test_empty_dict_returns_empty_string(self):
+        """An empty criteria dict should return an empty string."""
+        result = _format_criteria({})
+        assert result == ""
+
+    def test_key_and_value_separated_by_colon(self):
+        """Each line must use the 'key: value' format."""
+        result = _format_criteria({"tone": "Is the tone right?"})
+        assert "tone: Is the tone right?" in result
+
+
+# ---------------------------------------------------------------------------
+# _format_scores
+# ---------------------------------------------------------------------------
+
+
+class TestFormatScores:
+    """Tests for the _format_scores helper."""
+
+    def test_scores_include_slash_ten_suffix(self):
+        """Every score must be rendered as N/10."""
+        result = _format_scores({"clarity": 7, "depth": 9})
+        assert "7/10" in result
+        assert "9/10" in result
+
+    def test_criterion_names_present(self):
+        """Criterion names must appear in the output."""
+        result = _format_scores({"clarity": 7, "depth": 9})
+        assert "clarity" in result
+        assert "depth" in result
+
+    def test_single_score_formats_correctly(self):
+        """A single-score dict should produce one line with /10."""
+        result = _format_scores({"quality": 5})
+        assert "quality" in result
+        assert "5/10" in result
+        assert result.count("/10") == 1
+
+    def test_multiple_scores_produce_multiple_lines(self):
+        """Multiple scores should produce one line each."""
+        result = _format_scores({"a": 1, "b": 2, "c": 3})
+        lines = result.strip().split("\n")
+        assert len(lines) == 3
+
+    def test_zero_score_formats_correctly(self):
+        """A score of 0 should still render as 0/10."""
+        result = _format_scores({"metric": 0})
+        assert "0/10" in result
+
+    def test_ten_score_formats_correctly(self):
+        """A perfect score of 10 should render as 10/10."""
+        result = _format_scores({"metric": 10})
+        assert "10/10" in result
+
+
+# ---------------------------------------------------------------------------
+# _optional_block
+# ---------------------------------------------------------------------------
+
+
+class TestOptionalBlock:
+    """Tests for the _optional_block helper."""
+
+    def test_with_value_includes_label(self):
+        """When value is provided the label must appear in the output."""
+        result = _optional_block("BACKGROUND", "some context here")
+        assert "BACKGROUND" in result
+
+    def test_with_value_includes_content(self):
+        """When value is provided the content must appear in the output."""
+        result = _optional_block("BACKGROUND", "some context here")
+        assert "some context here" in result
+
+    def test_with_none_returns_empty_string(self):
+        """When value is None the result must be an empty string."""
+        result = _optional_block("BACKGROUND", None)
+        assert result == ""
+
+    def test_with_empty_string_returns_empty_string(self):
+        """When value is an empty string the result must be an empty string."""
+        result = _optional_block("BACKGROUND", "")
+        assert result == ""
+
+    def test_different_labels_produce_different_outputs(self):
+        """Two calls with different labels but same value must differ."""
+        result_a = _optional_block("LABEL_A", "shared content")
+        result_b = _optional_block("LABEL_B", "shared content")
+        assert result_a != result_b
+
+    def test_output_starts_with_newline(self):
+        """The returned block should start with a newline to separate from context."""
+        result = _optional_block("SECTION", "text")
+        assert result.startswith("\n")

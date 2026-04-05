@@ -34,6 +34,17 @@ class TestDetectArtifactType:
     def test_nonexistent_path_returns_single_file(self):
         assert _detect_artifact_type("/does/not/exist/file.md", "auto") == "single-file"
 
+    def test_long_text_is_not_treated_as_path(self):
+        """Text longer than 260 chars must never be stat'd as a filesystem path."""
+        long_text = "A" * 300
+        # Should return single-file without trying filesystem lookup
+        assert _detect_artifact_type(long_text, "auto") == "single-file"
+
+    def test_text_with_newlines_is_not_treated_as_path(self):
+        """Multi-line text must not be interpreted as a filesystem path."""
+        multiline = "first line\nsecond line"
+        assert _detect_artifact_type(multiline, "auto") == "single-file"
+
 
 # ---------------------------------------------------------------------------
 # _detect_mode
@@ -59,6 +70,15 @@ class TestDetectMode:
 
     def test_short_nonexistent_returns_seedless(self):
         assert _detect_mode("write a landing page for my SaaS", "single-file") == "seedless"
+
+    def test_short_description_without_newlines_is_seedless(self):
+        """A short description with no newlines and no matching file path is seedless."""
+        assert _detect_mode("improve my essay introduction", "single-file") == "seedless"
+
+    def test_long_text_with_newlines_does_not_check_filesystem(self):
+        """Text longer than 260 chars with newlines is from-paste, not a path lookup."""
+        long_multiline = ("word " * 60) + "\nmore text here"
+        assert _detect_mode(long_multiline, "single-file") == "from-paste"
 
 
 # ---------------------------------------------------------------------------
