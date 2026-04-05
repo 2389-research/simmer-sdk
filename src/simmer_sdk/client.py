@@ -39,10 +39,11 @@ def create_async_client(brief: SetupBrief):
             aws_access_key=brief.aws_access_key,
             aws_secret_key=brief.aws_secret_key,
             aws_region=brief.aws_region,
+            max_retries=3,
         )
     else:
         from anthropic import AsyncAnthropic
-        return AsyncAnthropic()
+        return AsyncAnthropic(max_retries=3)
 
 
 def map_model_id(model: str, brief: SetupBrief) -> str:

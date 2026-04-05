@@ -408,31 +408,40 @@ async def dispatch_board(
     # Phase 1: Independent scoring (parallel)
     # -----------------------------------------------------------------------
     phase1_results: list[tuple[str, str, JudgeOutput]] = []
+    phase1_errors: list[tuple[str, Exception]] = []
 
     async with anyio.create_task_group() as tg:
         async def _run_panelist(judge_def: JudgeDefinition) -> None:
-            result = await _dispatch_single_panelist(
-                brief=brief,
-                judge_def=judge_def,
-                problem_class=problem_class,
-                iteration=iteration,
-                candidate=candidate,
-                seed_candidate=seed_candidate,
-                seed_scores=seed_scores,
-                evaluator_output=evaluator_output,
-                previous_asi=previous_asi,
-                iteration_history=iteration_history,
-                exploration_status=exploration_status,
-                previous_deliberation=previous_deliberation,
-                candidate_path=candidate_path,
-                evaluator_path=evaluator_path,
-                prior_candidate_paths=prior_candidate_paths,
-                output_contract=brief.output_contract,
-            )
-            phase1_results.append(result)
+            try:
+                result = await _dispatch_single_panelist(
+                    brief=brief,
+                    judge_def=judge_def,
+                    problem_class=problem_class,
+                    iteration=iteration,
+                    candidate=candidate,
+                    seed_candidate=seed_candidate,
+                    seed_scores=seed_scores,
+                    evaluator_output=evaluator_output,
+                    previous_asi=previous_asi,
+                    iteration_history=iteration_history,
+                    exploration_status=exploration_status,
+                    previous_deliberation=previous_deliberation,
+                    candidate_path=candidate_path,
+                    evaluator_path=evaluator_path,
+                    prior_candidate_paths=prior_candidate_paths,
+                    output_contract=brief.output_contract,
+                )
+                phase1_results.append(result)
+            except Exception as exc:
+                phase1_errors.append((judge_def.name, exc))
 
         for judge_def in judges:
             tg.start_soon(_run_panelist, judge_def)
+
+    # Need at least 1 judge to proceed — if all failed, surface the details
+    if not phase1_results:
+        error_details = "; ".join(f"{name}: {exc}" for name, exc in phase1_errors)
+        raise RuntimeError(f"All {len(judges)} board judges failed: {error_details}")
 
     # -----------------------------------------------------------------------
     # Phase 2: Deliberation (one round)
@@ -449,23 +458,27 @@ async def dispatch_board(
     deliberation_results: dict[str, str] = {}
     post_deliberation_scores: list[dict[str, int]] = []
 
-    async with anyio.create_task_group() as tg:
-        delib_results_list: list[tuple[str, str]] = []
+    delib_results_list: list[tuple[str, str]] = []
+    delib_errors: list[tuple[str, Exception]] = []
 
+    async with anyio.create_task_group() as tg:
         async def _run_deliberation(jname: str) -> None:
-            others = [
-                (oname, stripped_outputs[oname])
-                for oname in stripped_outputs
-                if oname != jname
-            ]
-            name, delib_text = await _deliberate_single(
-                model=brief.clerk_model,
-                judge_name=jname,
-                own_output=full_outputs[jname],
-                other_outputs=others,
-                brief=brief,
-            )
-            delib_results_list.append((name, delib_text))
+            try:
+                others = [
+                    (oname, stripped_outputs[oname])
+                    for oname in stripped_outputs
+                    if oname != jname
+                ]
+                name, delib_text = await _deliberate_single(
+                    model=brief.clerk_model,
+                    judge_name=jname,
+                    own_output=full_outputs[jname],
+                    other_outputs=others,
+                    brief=brief,
+                )
+                delib_results_list.append((name, delib_text))
+            except Exception as exc:
+                delib_errors.append((jname, exc))
 
         for jname in stripped_outputs:
             tg.start_soon(_run_deliberation, jname)
@@ -478,6 +491,12 @@ async def dispatch_board(
             brief.criteria,
         )
         post_deliberation_scores.append(revised)
+
+    # For judges whose deliberation failed, fall back to their Phase 1 scores
+    succeeded_delib_names = {name for name, _ in delib_results_list}
+    for name in phase1_scores:
+        if name not in succeeded_delib_names:
+            post_deliberation_scores.append(phase1_scores[name])
 
     # -----------------------------------------------------------------------
     # Phase 3: Synthesis
