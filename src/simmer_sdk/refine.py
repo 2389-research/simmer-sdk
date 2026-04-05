@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Callable, Optional
@@ -194,12 +195,12 @@ def _run_evaluator(
     if not brief.evaluator:
         return ""
 
-    # Template the evaluator command
+    # Template the evaluator command — quote path vars to prevent shell injection
     cmd = brief.evaluator
     if candidate_path:
-        cmd = cmd.replace("{candidate_path}", candidate_path)
+        cmd = cmd.replace("{candidate_path}", shlex.quote(candidate_path))
     if output_dir:
-        cmd = cmd.replace("{output_dir}", output_dir)
+        cmd = cmd.replace("{output_dir}", shlex.quote(output_dir))
     cmd = cmd.replace("{iteration}", str(iteration))
 
     # Set cwd: workspace dir for workspace mode, output dir for single-file
@@ -301,6 +302,23 @@ async def refine(
     """
     artifact_str = str(artifact)
 
+    # Input validation
+    if not criteria:
+        raise ValueError("criteria must be a non-empty dict")
+    if iterations < 0:
+        raise ValueError("iterations must be >= 0")
+    valid_modes = {"auto", "seedless", "from-file", "from-paste", "from-workspace"}
+    if mode not in valid_modes:
+        raise ValueError(f"mode must be one of {valid_modes}, got {mode!r}")
+    valid_judge_modes = {"auto", "single", "board"}
+    if judge_mode not in valid_judge_modes:
+        raise ValueError(f"judge_mode must be one of {valid_judge_modes}, got {judge_mode!r}")
+    valid_providers = {"anthropic", "bedrock"}
+    if api_provider not in valid_providers:
+        raise ValueError(f"api_provider must be one of {valid_providers}, got {api_provider!r}")
+    if judge_count < 2:
+        raise ValueError("judge_count must be >= 2")
+
     # ------------------------------------------------------------------
     # Step 0: Setup
     # ------------------------------------------------------------------
@@ -350,7 +368,6 @@ async def refine(
     # Gap Fix 5: Compute evaluator_path so judges can read the evaluator script
     evaluator_path: str | None = None
     if brief.evaluator:
-        import shlex
         try:
             parts_eval = shlex.split(brief.evaluator)
             for part in parts_eval:
