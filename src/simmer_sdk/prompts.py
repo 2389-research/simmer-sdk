@@ -12,6 +12,38 @@ from typing import Optional
 from simmer_sdk.types import JudgeDefinition, StableWins
 
 # ---------------------------------------------------------------------------
+# Default judge preamble for local models
+# ---------------------------------------------------------------------------
+
+LOCAL_JUDGE_PREAMBLE = """\
+You have tools available: glob (list files), read (read file contents), grep (search files).
+
+YOUR OUTPUT MUST FOLLOW THIS FORMAT — responses that skip sections are INVALID:
+
+<investigation>
+Use your tools here. You MUST call glob to list files in the sample directory,
+then call read on at least 3 files. Do this BEFORE scoring.
+</investigation>
+
+<evidence>
+Quote or summarize specific content from the files you read.
+What entities, names, organizations, concepts did you find?
+</evidence>
+
+<scoring>
+ITERATION [N] SCORES:
+  [criterion]: [N]/10 — [reasoning referencing your evidence] — [specific improvement]
+COMPOSITE: [N.N]/10
+
+ASI (highest-leverage direction):
+[your single most impactful improvement, grounded in what you found in the files]
+</scoring>
+
+CRITICAL: A score produced without <investigation> and <evidence> sections is INVALID.
+You have NO prior knowledge of these documents. You MUST read them to score accurately.
+"""
+
+# ---------------------------------------------------------------------------
 # Skill file loading
 # ---------------------------------------------------------------------------
 
@@ -154,6 +186,7 @@ def build_judge_prompt(
     candidate_path: Optional[str] = None,
     evaluator_path: Optional[str] = None,
     prior_candidate_paths: Optional[list[str]] = None,
+    judge_preamble: Optional[str] = None,
 ) -> str:
     """Build the single judge subagent prompt.
 
@@ -165,13 +198,20 @@ def build_judge_prompt(
 
     parts: list[str] = [
         "You are the judge in a simmer refinement loop.\n",
+    ]
+
+    # Judge preamble — injected before everything else for local models
+    if judge_preamble:
+        parts.append(judge_preamble)
+
+    parts.extend([
         "Invoke the skill: simmer:simmer-judge\n",
         skill_text,
         f"\nITERATION: {iteration}",
         f"ARTIFACT_TYPE: {artifact_type}",
         f"\nCRITERIA:\n{_format_criteria(criteria)}",
         f"\nCANDIDATE:\n{candidate}",
-    ]
+    ])
 
     # File paths for investigation
     if candidate_path:
@@ -238,6 +278,7 @@ def build_board_panelist_prompt(
     evaluator_path: Optional[str] = None,
     prior_candidate_paths: Optional[list[str]] = None,
     output_contract: Optional[str] = None,
+    judge_preamble: Optional[str] = None,
 ) -> str:
     """Build a board panelist prompt.
 
@@ -253,10 +294,17 @@ def build_board_panelist_prompt(
     parts: list[str] = [
         "You are one of three judges on a simmer judge board. Your role is to "
         "score from your specific lens — the other judges cover other angles.\n",
+    ]
+
+    # Judge preamble — injected before everything else for local models
+    if judge_preamble:
+        parts.append(judge_preamble)
+
+    parts.extend([
         f"YOUR LENS: {judge_def.name}",
         f"{judge_def.lens}\n",
         f"ARTIFACT_TYPE: {artifact_type}",
-    ]
+    ])
 
     if search_space:
         parts.append(f"SEARCH_SPACE: {search_space}")

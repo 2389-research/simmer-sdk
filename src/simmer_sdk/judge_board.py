@@ -123,7 +123,8 @@ async def compose_judges(
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
     )
-    text = response.content[0].text
+    from simmer_sdk.client import extract_text
+    text = extract_text(response)
 
     judges = _parse_judge_panel(text)
 
@@ -189,6 +190,12 @@ async def _dispatch_single_panelist(
         custom_primitives=judge_def.primitives if judge_def.primitives else None,
     )
 
+    # Resolve judge preamble: use explicit value, or local default for ollama
+    preamble = brief.judge_preamble
+    if preamble is None and brief.api_provider == "ollama":
+        from simmer_sdk.prompts import LOCAL_JUDGE_PREAMBLE
+        preamble = LOCAL_JUDGE_PREAMBLE
+
     prompt = build_board_panelist_prompt(
         judge_def=judge_def,
         iteration=iteration,
@@ -210,10 +217,25 @@ async def _dispatch_single_panelist(
         evaluator_path=evaluator_path,
         prior_candidate_paths=prior_candidate_paths,
         output_contract=output_contract,
+        judge_preamble=preamble,
     )
 
     is_workspace = brief.artifact_type == "workspace"
     workspace_path: Optional[str] = brief.artifact if is_workspace else None
+
+    # Local mode: use Ollama agent loop instead of Claude CLI
+    if brief.api_provider == "ollama":
+        from simmer_sdk.local_agent import run_local_agent
+        result_text = await run_local_agent(
+            prompt=prompt,
+            model=brief.judge_model,
+            ollama_url=brief.ollama_url,
+            tools=["Read", "Grep", "Glob"],
+            cwd=workspace_path if is_workspace else brief.output_dir,
+            max_turns=25,
+        )
+        parsed = parse_judge_output(result_text, brief.criteria)
+        return judge_def.name, result_text, parsed
 
     from simmer_sdk.client import map_model_id, get_agent_env, get_cli_path
     max_turns = 25
@@ -272,7 +294,8 @@ async def _deliberate_single(
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
     )
-    return judge_name, response.content[0].text
+    from simmer_sdk.client import extract_text
+    return judge_name, extract_text(response)
 
 
 def _extract_revised_scores(
@@ -502,7 +525,8 @@ async def dispatch_board(
         max_tokens=4096,
         messages=[{"role": "user", "content": synthesis_prompt}],
     )
-    synthesis_text = response.content[0].text
+    from simmer_sdk.client import extract_text
+    synthesis_text = extract_text(response)
 
     asi, deliberation_summary = _parse_synthesis(synthesis_text, brief.criteria)
 

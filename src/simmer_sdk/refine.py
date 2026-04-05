@@ -285,11 +285,13 @@ async def refine(
     generator_model: str = "claude-sonnet-4-6",
     judge_model: str = "claude-sonnet-4-6",
     clerk_model: str = "claude-haiku-4-5",
-    # Optional — API provider (Bedrock support)
+    # Optional — API provider
     api_provider: str = "anthropic",
     aws_access_key: str | None = None,
     aws_secret_key: str | None = None,
     aws_region: str | None = None,
+    ollama_url: str = "http://localhost:11434",
+    judge_preamble: str | None = None,
     # Optional — callbacks
     on_iteration: Callable | None = None,
     on_plateau: Callable | None = None,
@@ -338,6 +340,8 @@ async def refine(
         aws_access_key=aws_access_key,
         aws_secret_key=aws_secret_key,
         aws_region=aws_region,
+        ollama_url=ollama_url,
+        judge_preamble=judge_preamble,
     )
 
     brief = resolve_brief(brief)
