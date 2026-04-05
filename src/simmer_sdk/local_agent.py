@@ -91,12 +91,29 @@ def _tool_glob(pattern: str, path: str = ".") -> str:
 
 
 def _tool_write(file_path: str, content: str) -> str:
-    """Write content to a file, creating directories as needed."""
+    """Write content to a file, creating directories as needed.
+
+    If the file_path matches a known candidate pattern (iteration-N-candidate.md,
+    trajectory.md, etc.), write it directly in cwd regardless of what path prefix
+    the model constructs. Models often duplicate or mangle the cwd in paths.
+    """
     try:
         p = Path(file_path)
+        cwd = Path.cwd()
+        basename = p.name
+
+        # For known simmer artifact filenames, always write to cwd/basename.
+        # This prevents models from creating nested directory structures when
+        # they construct paths like /cwd/cwd/iteration-1-candidate.md.
+        known_patterns = ("iteration-", "trajectory.md", "result.md", "seed.md")
+        if any(basename.startswith(pat) or basename == pat for pat in known_patterns):
+            p = cwd / basename
+        elif not p.is_absolute():
+            p = cwd / p
+
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
-        return f"Wrote {len(content)} bytes to {file_path}"
+        return f"Wrote {len(content)} bytes to {p}"
     except Exception as e:
         return f"Error writing {file_path}: {e}"
 
