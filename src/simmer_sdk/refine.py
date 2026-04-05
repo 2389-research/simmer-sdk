@@ -178,13 +178,13 @@ def _git_rollback_workspace(
     _git_run(workspace, "commit", "-m", f"simmer: rollback to {target_sha[:8]}", "--allow-empty")
 
 
-def _run_evaluator(
+async def _run_evaluator(
     brief: SetupBrief,
     candidate_path: str | None = None,
     iteration: int = 0,
     output_dir: str | None = None,
 ) -> str:
-    """Run the evaluator subprocess and return combined stdout+stderr.
+    """Run the evaluator subprocess without blocking the event loop.
 
     The evaluator command supports template variables matching the skill's behavior:
     - ``{candidate_path}`` — absolute path to the current candidate file
@@ -212,24 +212,22 @@ def _run_evaluator(
         cwd = output_dir or brief.output_dir
 
     try:
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=3600,
+        import anyio
+        result = await anyio.run_process(
+            ["sh", "-c", cmd],
             cwd=cwd,
+            check=False,
         )
         output_parts = []
-        if result.stdout:
-            output_parts.append(result.stdout)
-        if result.stderr:
-            output_parts.append(result.stderr)
+        stdout = result.stdout.decode() if result.stdout else ""
+        stderr = result.stderr.decode() if result.stderr else ""
+        if stdout:
+            output_parts.append(stdout)
+        if stderr:
+            output_parts.append(stderr)
         if result.returncode != 0:
             output_parts.append(f"EXIT CODE: {result.returncode}")
         return "\n".join(output_parts)
-    except subprocess.TimeoutExpired:
-        return "EVALUATOR TIMEOUT: command exceeded 3600s"
     except Exception as e:
         return f"EVALUATOR ERROR: {e}"
 
@@ -435,7 +433,7 @@ async def refine(
     candidate_path = str(out_path / "iteration-0-candidate.md") if brief.artifact_type == "single-file" else None
 
     # Run evaluator on seed if present
-    evaluator_output = _run_evaluator(
+    evaluator_output = await _run_evaluator(
         brief, candidate_path=candidate_path, iteration=0, output_dir=str(out_path)
     ) if brief.evaluator else ""
 
@@ -568,7 +566,7 @@ async def refine(
 
         # c) Evaluator
         candidate_path = str(out_path / f"iteration-{i}-candidate.md") if brief.artifact_type == "single-file" else None
-        evaluator_output = _run_evaluator(
+        evaluator_output = await _run_evaluator(
             brief, candidate_path=candidate_path, iteration=i, output_dir=str(out_path)
         ) if brief.evaluator else ""
 

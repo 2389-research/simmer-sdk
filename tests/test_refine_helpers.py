@@ -7,7 +7,8 @@ import shlex
 
 import pytest
 
-from simmer_sdk.refine import _call_callback, _detect_artifact_type, _detect_mode, refine
+from simmer_sdk.refine import _call_callback, _detect_artifact_type, _detect_mode, _run_evaluator, refine
+from simmer_sdk.types import SetupBrief
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +59,63 @@ class TestDetectMode:
 
     def test_short_nonexistent_returns_seedless(self):
         assert _detect_mode("write a landing page for my SaaS", "single-file") == "seedless"
+
+
+# ---------------------------------------------------------------------------
+# _run_evaluator — async subprocess
+# ---------------------------------------------------------------------------
+
+
+def _make_brief(evaluator: str | None, tmp_path_str: str) -> SetupBrief:
+    """Build a minimal SetupBrief for evaluator tests."""
+    return SetupBrief(
+        artifact=tmp_path_str,
+        artifact_type="single-file",
+        criteria={"quality": "good"},
+        iterations=1,
+        mode="seedless",
+        evaluator=evaluator,
+        output_dir=tmp_path_str,
+    )
+
+
+class TestRunEvaluatorAsync:
+    """Verify _run_evaluator is async and returns output correctly."""
+
+    @pytest.mark.asyncio
+    async def test_no_evaluator_returns_empty_string(self, tmp_path):
+        brief = _make_brief(evaluator=None, tmp_path_str=str(tmp_path))
+        result = await _run_evaluator(brief)
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_echo_command_returns_stdout(self, tmp_path):
+        brief = _make_brief(evaluator="echo hello_evaluator", tmp_path_str=str(tmp_path))
+        result = await _run_evaluator(brief, output_dir=str(tmp_path))
+        assert "hello_evaluator" in result
+
+    @pytest.mark.asyncio
+    async def test_failing_command_includes_exit_code(self, tmp_path):
+        brief = _make_brief(evaluator="exit 42", tmp_path_str=str(tmp_path))
+        result = await _run_evaluator(brief, output_dir=str(tmp_path))
+        assert "EXIT CODE: 42" in result
+
+    @pytest.mark.asyncio
+    async def test_iteration_template_substituted(self, tmp_path):
+        brief = _make_brief(evaluator="echo iter={iteration}", tmp_path_str=str(tmp_path))
+        result = await _run_evaluator(brief, iteration=7, output_dir=str(tmp_path))
+        assert "iter=7" in result
+
+    @pytest.mark.asyncio
+    async def test_candidate_path_template_substituted(self, tmp_path):
+        candidate = tmp_path / "cand.md"
+        candidate.write_text("x")
+        brief = _make_brief(
+            evaluator="echo path={candidate_path}",
+            tmp_path_str=str(tmp_path),
+        )
+        result = await _run_evaluator(brief, candidate_path=str(candidate), output_dir=str(tmp_path))
+        assert str(candidate) in result
 
 
 # ---------------------------------------------------------------------------
