@@ -1,3 +1,6 @@
+# ABOUTME: Core data types for the simmer SDK.
+# ABOUTME: Defines IterationRecord, SimmerResult, SetupBrief, JudgeOutput, and callback types.
+
 from __future__ import annotations
 
 from collections.abc import Awaitable

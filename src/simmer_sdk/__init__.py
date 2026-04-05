@@ -1,3 +1,6 @@
+# ABOUTME: Public API surface for simmer-sdk.
+# ABOUTME: Exports refine(), types, and callback protocols.
+
 from simmer_sdk.types import (
     IterationRecord,
     JudgeDefinition,
@@ -18,6 +21,5 @@ __all__ = [
     "OnPlateauCallback",
     "SetupBrief",
     "SimmerResult",
-    "StableWins",
     "refine",
 ]

@@ -1,3 +1,6 @@
+# ABOUTME: Main orchestrator for the simmer refinement loop.
+# ABOUTME: Coordinates setup, generator, evaluator, judge, and reflect across iterations.
+
 """Orchestrator — Main Refinement Loop.
 
 The public ``refine()`` entry point that ties all modules together:

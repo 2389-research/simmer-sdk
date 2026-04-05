@@ -1,3 +1,6 @@
+# ABOUTME: Single judge subagent dispatch and score parsing.
+# ABOUTME: Parses LLM output into structured scores, reasoning, and ASI.
+
 from __future__ import annotations
 
 import re

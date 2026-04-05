@@ -1,3 +1,6 @@
+# ABOUTME: Judge board orchestration — parallel scoring, deliberation, synthesis.
+# ABOUTME: Manages 3-phase judge panel: independent score, cross-review, consensus.
+
 """Judge Board — board composition, parallel dispatch, deliberation, synthesis.
 
 Orchestrates a panel of 3 judges through three phases:

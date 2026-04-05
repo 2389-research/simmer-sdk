@@ -1,3 +1,6 @@
+# ABOUTME: Prompt construction for all simmer roles (generator, judge, board, reflect).
+# ABOUTME: Loads skill reference files verbatim and appends dynamic context per role.
+
 """Prompt-building functions for every role in the simmer loop.
 
 Each function loads the ACTUAL skill file from skill_reference/ and appends

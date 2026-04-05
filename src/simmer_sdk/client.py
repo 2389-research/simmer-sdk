@@ -1,3 +1,6 @@
+# ABOUTME: API client factory for Anthropic and AWS Bedrock providers.
+# ABOUTME: Handles model ID mapping, CLI path resolution, and agent environment setup.
+
 """Client factory for Anthropic API and AWS Bedrock.
 
 When api_provider="bedrock", creates AsyncAnthropicBedrock clients and maps

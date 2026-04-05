@@ -1,3 +1,6 @@
+# ABOUTME: Trajectory tracking, regression detection, plateau analysis, stable wins.
+# ABOUTME: Pure Python functions for iteration math plus LLM-based reflect dispatch.
+
 from __future__ import annotations
 
 import re
@@ -274,9 +277,10 @@ def format_trajectory_table(
         best_scores = trajectory[best_idx].scores
         best_composite = sum(best_scores.values()) / len(best_scores) if best_scores else 0.0
 
+    best_iter = trajectory[best_idx].iteration if best_idx < len(trajectory) else best_idx
     table_lines = [header_line, sep_line] + rows
     table_lines.append("")
-    table_lines.append(f"Best candidate: iteration {best_idx} (composite: {best_composite:.1f}/10)")
+    table_lines.append(f"Best candidate: iteration {best_iter} (composite: {best_composite:.1f}/10)")
 
     return "\n".join(table_lines)
 
