@@ -502,7 +502,11 @@ def build_board_composition_prompt(
     if search_space:
         parts.append(f"\nSEARCH_SPACE:\n{search_space}")
 
-    parts.append("""
+    judge_entries = "\n".join(
+        "  - name: [Judge Name]\n    lens: [What this judge focuses on and why]"
+        for _ in range(judge_count)
+    )
+    parts.append(f"""
 Design {judge_count} judges with diverse lenses for this specific problem. Each judge needs:
 - A unique angle on the problem
 - Relevant primitives from the library
@@ -510,12 +514,7 @@ Design {judge_count} judges with diverse lenses for this specific problem. Each 
 Output format:
 
 JUDGE_PANEL:
-  - name: [Judge Name]
-    lens: [What this judge focuses on and why]
-  - name: [Judge Name]
-    lens: [What this judge focuses on and why]
-  - name: [Judge Name]
-    lens: [What this judge focuses on and why]
+{judge_entries}
 """)
 
     return "\n".join(parts)

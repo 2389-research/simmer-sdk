@@ -399,7 +399,7 @@ async def dispatch_board(
         if stable_wins.working:
             parts.append("WORKING (preserve):\n" + "\n".join(f"- {w}" for w in stable_wins.working))
         if stable_wins.not_working:
-            parts.append("NOT WORKING (do not retry):\n" + "\n".join(f"- nw" for nw in stable_wins.not_working))
+            parts.append("NOT WORKING (do not retry):\n" + "\n".join(f"- {nw}" for nw in stable_wins.not_working))
         if stable_wins.direction:
             parts.append(f"DIRECTION:\n{stable_wins.direction}")
         previous_deliberation = "\n\n".join(parts)
