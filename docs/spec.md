@@ -112,11 +112,11 @@ refine() called
 
 | Simmer Role | Agent SDK Implementation |
 |-------------|------------------------|
-| Generator | `AgentDefinition(tools=["Read","Edit","Write","Bash"], model="sonnet")` |
-| Judge (single) | `AgentDefinition(tools=["Read","Grep","Glob"], model="opus")` |
-| Judge (board, 3x) | 3 AgentDefinitions with different prompts (lenses), dispatched in parallel |
-| Reflect | Python function (no subagent — just trajectory math and state management) |
-| Evaluator | `subprocess.run()` (user-provided command, not an LLM call) |
+| Generator | `ClaudeSDKClient(tools=["Read","Edit","Write","Bash","Glob","Grep"], model=generator_model)` |
+| Judge (single) | `ClaudeSDKClient(tools=["Read","Grep","Glob"], model=judge_model)` |
+| Judge (board, N×) | N `ClaudeSDKClient` instances in parallel (default 3, configurable via `judge_count`) |
+| Reflect | `ClaudeSDKClient(tools=["Read","Write","Glob"], model=clerk_model)` — Agent SDK subagent |
+| Evaluator | `anyio.run_process()` (user-provided command, not an LLM call) |
 | Clerk (synthesis) | Single `messages.create()` call to synthesize board output (no subagent needed) |
 
 ### Context Discipline
@@ -148,11 +148,12 @@ async def refine(
 
     # Optional — loop control
     iterations: int = 3,            # Number of generate-judge-reflect cycles
-    mode: str = "auto",             # "auto", "seedless", "from-file", "from-workspace"
+    mode: str = "auto",             # "auto", "seedless", "from-file", "from-paste", "from-workspace"
 
     # Optional — judge configuration
     judge_mode: str = "auto",       # "auto", "single", "board"
     judge_panel: list[dict] | None = None,  # Custom judge definitions
+    judge_count: int = 3,           # Number of judges on the board (min 2)
 
     # Optional — workspace
     output_dir: str | Path = "docs/simmer",
@@ -162,12 +163,19 @@ async def refine(
     search_space: str | None = None,
 
     # Optional — models
-    generator_model: str = "sonnet",
-    judge_model: str = "opus",
+    generator_model: str = "claude-sonnet-4-6",  # default
+    judge_model: str = "claude-sonnet-4-6",      # default
+    clerk_model: str = "claude-haiku-4-5",       # board composition, deliberation, reflect
+
+    # Optional — API provider (Bedrock support)
+    api_provider: str = "anthropic",   # "anthropic" | "bedrock"
+    aws_access_key: str | None = None,
+    aws_secret_key: str | None = None,
+    aws_region: str | None = None,
 
     # Optional — callbacks
-    on_iteration: Callable | None = None,  # Called after each iteration with trajectory
-    on_plateau: Callable | None = None,    # Called when plateau detected, return True to upgrade
+    on_iteration: OnIterationCallback | None = None,  # Called after each iteration
+    on_plateau: OnPlateauCallback | None = None,      # Called when plateau detected (single judge mode only)
 
 ) -> SimmerResult:
     ...
@@ -205,13 +213,19 @@ class IterationRecord:
 ### Callbacks
 
 ```python
-# Progress callback — called after each iteration
-async def on_iteration(record: IterationRecord, trajectory: list[IterationRecord]):
+# Progress callback — called after each iteration with 3 args
+async def on_iteration(
+    record: IterationRecord,
+    trajectory: list[IterationRecord],
+    trajectory_table: str,          # formatted markdown table
+) -> None:
     print(f"Iteration {record.iteration}: {record.composite}/10 — {record.key_change}")
+    print(trajectory_table)
 
-# Plateau callback — called when 3 iterations without improvement
-# Return True to upgrade to board, False to stop
-async def on_plateau(best_score: float, iterations_stuck: int) -> bool:
+# Plateau callback — called when 3 iterations without improvement.
+# Only triggered when judge_mode == "single".
+# Return True to upgrade to board and extend run by 2 iterations.
+async def on_plateau(trajectory: list[IterationRecord]) -> bool:
     return True  # auto-upgrade to board
 
 result = await refine(
@@ -268,7 +282,7 @@ Judges get `Read`, `Grep`, `Glob` tools so they can investigate.
 
 ## Stable Wins Tracking
 
-The reflect step (Python, not a subagent) maintains:
+The reflect step (an Agent SDK subagent using clerk_model) maintains:
 
 ```python
 @dataclass
@@ -322,7 +336,8 @@ simmer-sdk/
 │       ├── generator.py         # generator subagent dispatch
 │       ├── judge.py             # single judge subagent dispatch
 │       ├── judge_board.py       # board composition, dispatch, deliberation, synthesis
-│       ├── reflect.py           # trajectory tracking, regression, plateau, stable wins
+│       ├── reflect.py           # trajectory tracking, regression, plateau, stable wins (subagent)
+│       ├── client.py            # API client factory (Anthropic + Bedrock), model ID mapping
 │       ├── primitives.py        # built-in judge primitive library
 │       ├── prompts.py           # prompt templates for all roles
 │       └── types.py             # SimmerResult, IterationRecord, StableWins, etc.
@@ -348,12 +363,13 @@ simmer-sdk/
 ```toml
 [project]
 dependencies = [
-    "claude-agent-sdk>=0.1.48",
+    "claude-agent-sdk>=0.1.50",
     "anthropic>=0.40.0",
+    "boto3>=1.42.78",
 ]
 ```
 
-Minimal. Just the Agent SDK (which depends on the Anthropic SDK). Everything else is stdlib.
+The Agent SDK (which depends on the Anthropic SDK) plus `boto3` for AWS Bedrock support. Everything else is stdlib.
 
 ## Relationship to the Skill
 
@@ -364,7 +380,7 @@ The SDK and the skill are parallel implementations of the same architecture:
 | Orchestrator | Markdown instructions in SKILL.md | Python `refine()` function |
 | Generator | Subagent dispatched by Claude Code | `AgentDefinition` dispatched via Agent SDK |
 | Judge | Subagent dispatched by Claude Code | `AgentDefinition` dispatched via Agent SDK |
-| Reflect | Inline in Claude Code session | Python function (trajectory math) |
+| Reflect | Inline in Claude Code session | Agent SDK subagent (reads/writes trajectory.md via tools) |
 | Evaluator | `Bash` tool call | `subprocess.run()` |
 | Context discipline | Controlled by what's in the subagent prompt | Same — controlled by prompt construction |
 | Judge board | Skill instructions for dispatch + deliberation | Python orchestration of 3 parallel subagents |
@@ -410,7 +426,7 @@ result = await refine(
     iterations=5,
     judge_mode="board",
     background="Local Ollama, qwen3.5:9b. Evaluator runs 1 video, ~5 min per run.",
-    on_iteration=lambda r, t: print(f"Iter {r.iteration}: {r.composite}/10"),
+    on_iteration=lambda r, t, table: print(f"Iter {r.iteration}: {r.composite}/10"),
 )
 ```
 
@@ -437,8 +453,8 @@ async def simmer_domain_spec(domain: str, sample_docs: list[str], eval_docs: lis
         iterations=5,
         judge_mode="board",
         background=f"Domain: {domain}. Execution model: qwen3.5:27b local.",
-        on_iteration=lambda r, t: log_progress(domain, r),
-        on_plateau=lambda score, stuck: stuck >= 3,  # auto-upgrade
+        on_iteration=lambda r, t, table: log_progress(domain, r),
+        on_plateau=lambda trajectory: True,  # auto-upgrade to board
     )
 
     # Deploy the simmered spec
@@ -468,12 +484,12 @@ result = await refine(
 
 ## Open Questions
 
-1. **Should reflect be a subagent or Python?** Currently spec'd as Python (trajectory math doesn't need LLM reasoning). But stable wins extraction ("is this element load-bearing?") might benefit from LLM judgment. Could start as Python and upgrade if needed.
+1. ~~**Should reflect be a subagent or Python?**~~ **Resolved.** Reflect is implemented as an Agent SDK subagent (`dispatch_reflect` in `reflect.py`) using clerk_model (haiku). It reads the current `trajectory.md`, updates it with the new iteration's scores, and writes it back via the Write tool. The orchestrator then parses the file for control-flow signals (regression, ASI, stable wins).
 
-2. **How to handle the judge board's deliberation round?** The skill has judges "see each other's scores." In the SDK, this means dispatching 3 subagents, collecting their output, then dispatching 3 more subagents with the cross-visibility context. That's 6 subagent calls per board iteration. Is there a more efficient pattern?
+2. **How to handle the judge board's deliberation round?** The skill has judges "see each other's scores." In the SDK, this means dispatching N subagents, collecting their output, then dispatching N more subagents with the cross-visibility context. That's 2×N subagent calls per board iteration. Is there a more efficient pattern?
 
 3. **Streaming progress during long evaluator runs.** The evaluator is a subprocess that might run for 5-15 minutes. The SDK's `on_iteration` callback fires after the iteration completes. Should we also emit progress during the evaluator run?
 
 4. **Testing strategy.** Integration tests need real API calls (expensive). Unit tests can cover reflect, plateau detection, and board composition logic. What's the right balance?
 
-5. **Package distribution.** PyPI as `simmer-sdk`? Or scoped as `@2389/simmer-sdk`?
+5. ~~**Package distribution.**~~ **Resolved.** Package name on PyPI is `simmer-sdk` (see `pyproject.toml`). Note the package name may differ from the import name (`simmer_sdk`).
