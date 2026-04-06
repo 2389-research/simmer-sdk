@@ -198,7 +198,9 @@ async def _run_evaluator(
     if not brief.evaluator:
         return ""
 
-    # Template the evaluator command — quote path vars to prevent shell injection
+    # Template the evaluator command — quote path vars to prevent shell injection.
+    # Note: shlex.quote wraps in single-quotes, so evaluator commands must NOT
+    # add their own quotes around {candidate_path} or {output_dir} placeholders.
     cmd = brief.evaluator
     if candidate_path:
         cmd = cmd.replace("{candidate_path}", shlex.quote(candidate_path))

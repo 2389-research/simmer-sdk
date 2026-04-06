@@ -137,6 +137,8 @@ async def compose_judges(
             JudgeDefinition(name="Analyst", lens="Evaluate correctness and completeness against criteria"),
             JudgeDefinition(name="Pragmatist", lens="Evaluate practical utility and execution quality"),
             JudgeDefinition(name="Critic", lens="Challenge assumptions and find weaknesses"),
+            JudgeDefinition(name="Strategist", lens="Evaluate coherence of approach and long-term viability"),
+            JudgeDefinition(name="Empiricist", lens="Evaluate evidence quality and measurable outcomes"),
         ]
         judges = defaults[:target_count]
 

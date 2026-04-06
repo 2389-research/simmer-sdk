@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from simmer_sdk.types import IterationRecord, SetupBrief, StableWins
 
@@ -243,7 +246,7 @@ async def condense_key_change_llm(report: str, brief: SetupBrief | None = None, 
         if len(result) <= 60 and result:
             return result
     except Exception:
-        pass
+        logger.debug("condense_key_change_llm failed, falling back to regex", exc_info=True)
     return condense_key_change(report)
 
 

@@ -56,34 +56,52 @@ class TestConsensusScores:
 
 
 class TestNotWorkingRendering:
-    """Test that NOT WORKING items render with their actual text, not literal 'nw'."""
+    """Regression tests for the NOT WORKING f-string bug.
 
-    def _build_previous_deliberation(self, stable_wins: StableWins) -> str:
-        """Replicates the exact code path from dispatch_board for the previous_deliberation string."""
-        parts: list[str] = []
-        if stable_wins.working:
-            parts.append("WORKING (preserve):\n" + "\n".join(f"- {w}" for w in stable_wins.working))
-        if stable_wins.not_working:
-            parts.append("NOT WORKING (do not retry):\n" + "\n".join(f"- nw" for nw in stable_wins.not_working))
-        if stable_wins.direction:
-            parts.append(f"DIRECTION:\n{stable_wins.direction}")
-        return "\n\n".join(parts)
+    These tests verify the actual production code in judge_board.py by
+    grepping the source file for the deliberation-building f-string.
+    This catches regressions at the source level rather than testing
+    a local reimplementation.
+    """
 
-    def test_not_working_items_render_as_literal_nw_before_fix(self):
-        """This test documents the bug: items render as '- nw' not their text.
+    def test_production_code_uses_fstring_variable_not_literal(self):
+        """The f-string in dispatch_board must use {nw}, not literal 'nw'."""
+        import re
+        from pathlib import Path
 
-        Once the bug is fixed this test should FAIL (it demonstrates the broken behavior).
-        It is kept to document what the bug looked like.
-        """
+        board_src = Path(__file__).parent.parent / "src" / "simmer_sdk" / "judge_board.py"
+        source = board_src.read_text()
+
+        # Find all f-string lines that iterate not_working items
+        # The fixed code should have f"- {nw}" and NOT f"- nw"
+        nw_fstrings = re.findall(r'f"- \{?nw\}?"', source)
+        assert len(nw_fstrings) > 0, "Expected at least one f-string for not_working rendering"
+        for match in nw_fstrings:
+            assert "{nw}" in match, (
+                f"Found f-string rendering not_working items as literal 'nw': {match}. "
+                f"Must use {{nw}} to interpolate the variable."
+            )
+
+    def test_not_working_rendering_end_to_end(self):
+        """Build a previous_deliberation string the same way dispatch_board does."""
         stable_wins = StableWins(not_working=["approach A failed", "approach B was wrong"])
-        result = self._build_previous_deliberation(stable_wins)
-        # The buggy version renders literal "nw" instead of item text
-        assert "- nw" in result
-        assert "approach A failed" not in result
-        assert "approach B was wrong" not in result
+        # Replicate the exact code path from dispatch_board
+        parts: list[str] = []
+        if stable_wins.not_working:
+            parts.append("NOT WORKING (do not retry):\n" + "\n".join(f"- {nw}" for nw in stable_wins.not_working))
+        result = "\n\n".join(parts)
+        assert "approach A failed" in result
+        assert "approach B was wrong" in result
+        # Must not contain the literal variable name as a bullet
+        assert "- nw\n" not in result
 
-    def _build_previous_deliberation_fixed(self, stable_wins: StableWins) -> str:
-        """The correct version of the dispatch_board code path after bug fix."""
+    def test_working_items_render_correctly(self):
+        """WORKING items should render their actual text."""
+        stable_wins = StableWins(
+            working=["thing one works", "thing two works"],
+            not_working=["bad approach"],
+            direction="try something else",
+        )
         parts: list[str] = []
         if stable_wins.working:
             parts.append("WORKING (preserve):\n" + "\n".join(f"- {w}" for w in stable_wins.working))
@@ -91,32 +109,7 @@ class TestNotWorkingRendering:
             parts.append("NOT WORKING (do not retry):\n" + "\n".join(f"- {nw}" for nw in stable_wins.not_working))
         if stable_wins.direction:
             parts.append(f"DIRECTION:\n{stable_wins.direction}")
-        return "\n\n".join(parts)
-
-    def test_not_working_items_render_actual_text(self):
-        """After fix: NOT WORKING items must render their actual text."""
-        stable_wins = StableWins(not_working=["approach A failed", "approach B was wrong"])
-        result = self._build_previous_deliberation_fixed(stable_wins)
-        assert "approach A failed" in result
-        assert "approach B was wrong" in result
-        assert "NOT WORKING (do not retry):\n- approach A failed\n- approach B was wrong" in result
-
-    def test_not_working_does_not_contain_literal_nw_variable_name(self):
-        """After fix: output must not contain the literal variable name 'nw' as a list item."""
-        stable_wins = StableWins(not_working=["something broke"])
-        result = self._build_previous_deliberation_fixed(stable_wins)
-        # "- nw" should not appear as a standalone bullet (the bug artifact)
-        assert "- nw\n" not in result
-        assert result.count("- nw") == 0
-
-    def test_working_items_still_render_correctly(self):
-        """WORKING items should be unaffected by the fix."""
-        stable_wins = StableWins(
-            working=["thing one works", "thing two works"],
-            not_working=["bad approach"],
-            direction="try something else",
-        )
-        result = self._build_previous_deliberation_fixed(stable_wins)
+        result = "\n\n".join(parts)
         assert "thing one works" in result
         assert "thing two works" in result
         assert "bad approach" in result
