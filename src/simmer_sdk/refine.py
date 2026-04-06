@@ -1,3 +1,6 @@
+# ABOUTME: Main orchestrator for the simmer refinement loop.
+# ABOUTME: Coordinates setup, generator, evaluator, judge, and reflect across iterations.
+
 """Orchestrator — Main Refinement Loop.
 
 The public ``refine()`` entry point that ties all modules together:
@@ -6,9 +9,9 @@ setup -> seed judgment -> iterate (generate -> evaluate -> judge -> reflect) -> 
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import re
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Callable, Optional
@@ -17,6 +20,8 @@ from simmer_sdk.types import (
     IterationRecord,
     JudgeDefinition,
     JudgeOutput,
+    OnIterationCallback,
+    OnPlateauCallback,
     SetupBrief,
     SimmerResult,
     StableWins,
@@ -34,7 +39,6 @@ from simmer_sdk.reflect import (
     track_exploration,
     write_trajectory_md,
     format_trajectory_table,
-    condense_key_change_llm,
     dispatch_reflect,
 )
 
@@ -175,13 +179,13 @@ def _git_rollback_workspace(
     _git_run(workspace, "commit", "-m", f"simmer: rollback to {target_sha[:8]}", "--allow-empty")
 
 
-def _run_evaluator(
+async def _run_evaluator(
     brief: SetupBrief,
     candidate_path: str | None = None,
     iteration: int = 0,
     output_dir: str | None = None,
 ) -> str:
-    """Run the evaluator subprocess and return combined stdout+stderr.
+    """Run the evaluator subprocess without blocking the event loop.
 
     The evaluator command supports template variables matching the skill's behavior:
     - ``{candidate_path}`` — absolute path to the current candidate file
@@ -194,12 +198,14 @@ def _run_evaluator(
     if not brief.evaluator:
         return ""
 
-    # Template the evaluator command
+    # Template the evaluator command — quote path vars to prevent shell injection.
+    # Note: shlex.quote wraps in single-quotes, so evaluator commands must NOT
+    # add their own quotes around {candidate_path} or {output_dir} placeholders.
     cmd = brief.evaluator
     if candidate_path:
-        cmd = cmd.replace("{candidate_path}", candidate_path)
+        cmd = cmd.replace("{candidate_path}", shlex.quote(candidate_path))
     if output_dir:
-        cmd = cmd.replace("{output_dir}", output_dir)
+        cmd = cmd.replace("{output_dir}", shlex.quote(output_dir))
     cmd = cmd.replace("{iteration}", str(iteration))
 
     # Set cwd: workspace dir for workspace mode, output dir for single-file
@@ -209,23 +215,24 @@ def _run_evaluator(
         cwd = output_dir or brief.output_dir
 
     try:
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=3600,
-            cwd=cwd,
-        )
+        import anyio
+        with anyio.fail_after(3600):
+            result = await anyio.run_process(
+                ["sh", "-c", cmd],
+                cwd=cwd,
+                check=False,
+            )
         output_parts = []
-        if result.stdout:
-            output_parts.append(result.stdout)
-        if result.stderr:
-            output_parts.append(result.stderr)
+        stdout = result.stdout.decode() if result.stdout else ""
+        stderr = result.stderr.decode() if result.stderr else ""
+        if stdout:
+            output_parts.append(stdout)
+        if stderr:
+            output_parts.append(stderr)
         if result.returncode != 0:
             output_parts.append(f"EXIT CODE: {result.returncode}")
         return "\n".join(output_parts)
-    except subprocess.TimeoutExpired:
+    except TimeoutError:
         return "EVALUATOR TIMEOUT: command exceeded 3600s"
     except Exception as e:
         return f"EVALUATOR ERROR: {e}"
@@ -293,8 +300,8 @@ async def refine(
     ollama_url: str = "http://localhost:11434",
     judge_preamble: str | None = None,
     # Optional — callbacks
-    on_iteration: Callable | None = None,
-    on_plateau: Callable | None = None,
+    on_iteration: OnIterationCallback | None = None,
+    on_plateau: OnPlateauCallback | None = None,
 ) -> SimmerResult:
     """Public entry point for the Simmer refinement loop.
 
@@ -302,6 +309,23 @@ async def refine(
     judge -> reflect) -> return result.
     """
     artifact_str = str(artifact)
+
+    # Input validation
+    if not criteria:
+        raise ValueError("criteria must be a non-empty dict")
+    if iterations < 0:
+        raise ValueError("iterations must be >= 0")
+    valid_modes = {"auto", "seedless", "from-file", "from-paste", "from-workspace"}
+    if mode not in valid_modes:
+        raise ValueError(f"mode must be one of {valid_modes}, got {mode!r}")
+    valid_judge_modes = {"auto", "single", "board"}
+    if judge_mode not in valid_judge_modes:
+        raise ValueError(f"judge_mode must be one of {valid_judge_modes}, got {judge_mode!r}")
+    valid_providers = {"anthropic", "bedrock", "ollama"}
+    if api_provider not in valid_providers:
+        raise ValueError(f"api_provider must be one of {valid_providers}, got {api_provider!r}")
+    if judge_count < 2:
+        raise ValueError("judge_count must be >= 2")
 
     # ------------------------------------------------------------------
     # Step 0: Setup
@@ -354,7 +378,6 @@ async def refine(
     # Gap Fix 5: Compute evaluator_path so judges can read the evaluator script
     evaluator_path: str | None = None
     if brief.evaluator:
-        import shlex
         try:
             parts_eval = shlex.split(brief.evaluator)
             for part in parts_eval:
@@ -420,7 +443,7 @@ async def refine(
     candidate_path = str(out_path / "iteration-0-candidate.md") if brief.artifact_type == "single-file" else None
 
     # Run evaluator on seed if present
-    evaluator_output = _run_evaluator(
+    evaluator_output = await _run_evaluator(
         brief, candidate_path=candidate_path, iteration=0, output_dir=str(out_path)
     ) if brief.evaluator else ""
 
@@ -553,7 +576,7 @@ async def refine(
 
         # c) Evaluator
         candidate_path = str(out_path / f"iteration-{i}-candidate.md") if brief.artifact_type == "single-file" else None
-        evaluator_output = _run_evaluator(
+        evaluator_output = await _run_evaluator(
             brief, candidate_path=candidate_path, iteration=i, output_dir=str(out_path)
         ) if brief.evaluator else ""
 

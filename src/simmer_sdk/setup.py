@@ -1,3 +1,6 @@
+# ABOUTME: Problem classification and judge mode auto-selection.
+# ABOUTME: Resolves SetupBrief config, classifies as text/creative, code/testable, or pipeline/engineering.
+
 from __future__ import annotations
 
 import copy

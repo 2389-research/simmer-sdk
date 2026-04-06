@@ -1,6 +1,6 @@
 [project]
 name = "simmer-sdk"
-version = "0.2.1"
+version = "0.3.0"
 description = "Programmatic simmer iterative refinement loop using the Claude Agent SDK"
 readme = "README.md"
 authors = [
@@ -28,3 +28,9 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+]

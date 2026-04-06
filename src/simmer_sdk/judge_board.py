@@ -1,3 +1,6 @@
+# ABOUTME: Judge board orchestration — parallel scoring, deliberation, synthesis.
+# ABOUTME: Manages 3-phase judge panel: independent score, cross-review, consensus.
+
 """Judge Board — board composition, parallel dispatch, deliberation, synthesis.
 
 Orchestrates a panel of 3 judges through three phases:
@@ -129,12 +132,14 @@ async def compose_judges(
     judges = _parse_judge_panel(text)
 
     # Fallback: if parsing failed, return sensible defaults
-    target_count = brief.judge_count if hasattr(brief, 'judge_count') and brief.judge_count else 3
+    target_count = brief.judge_count or 3
     if len(judges) < target_count:
         defaults = [
             JudgeDefinition(name="Analyst", lens="Evaluate correctness and completeness against criteria"),
             JudgeDefinition(name="Pragmatist", lens="Evaluate practical utility and execution quality"),
             JudgeDefinition(name="Critic", lens="Challenge assumptions and find weaknesses"),
+            JudgeDefinition(name="Strategist", lens="Evaluate coherence of approach and long-term viability"),
+            JudgeDefinition(name="Empiricist", lens="Evaluate evidence quality and measurable outcomes"),
         ]
         judges = defaults[:target_count]
 
@@ -422,7 +427,7 @@ async def dispatch_board(
         if stable_wins.working:
             parts.append("WORKING (preserve):\n" + "\n".join(f"- {w}" for w in stable_wins.working))
         if stable_wins.not_working:
-            parts.append("NOT WORKING (do not retry):\n" + "\n".join(f"- nw" for nw in stable_wins.not_working))
+            parts.append("NOT WORKING (do not retry):\n" + "\n".join(f"- {nw}" for nw in stable_wins.not_working))
         if stable_wins.direction:
             parts.append(f"DIRECTION:\n{stable_wins.direction}")
         previous_deliberation = "\n\n".join(parts)
@@ -430,32 +435,44 @@ async def dispatch_board(
     # -----------------------------------------------------------------------
     # Phase 1: Independent scoring (parallel)
     # -----------------------------------------------------------------------
-    phase1_results: list[tuple[str, str, JudgeOutput]] = []
+    phase1_results: dict[int, tuple[str, str, JudgeOutput]] = {}
+    phase1_errors: list[tuple[str, Exception]] = []
 
     async with anyio.create_task_group() as tg:
-        async def _run_panelist(judge_def: JudgeDefinition) -> None:
-            result = await _dispatch_single_panelist(
-                brief=brief,
-                judge_def=judge_def,
-                problem_class=problem_class,
-                iteration=iteration,
-                candidate=candidate,
-                seed_candidate=seed_candidate,
-                seed_scores=seed_scores,
-                evaluator_output=evaluator_output,
-                previous_asi=previous_asi,
-                iteration_history=iteration_history,
-                exploration_status=exploration_status,
-                previous_deliberation=previous_deliberation,
-                candidate_path=candidate_path,
-                evaluator_path=evaluator_path,
-                prior_candidate_paths=prior_candidate_paths,
-                output_contract=brief.output_contract,
-            )
-            phase1_results.append(result)
+        async def _run_panelist(idx: int, judge_def: JudgeDefinition) -> None:
+            try:
+                result = await _dispatch_single_panelist(
+                    brief=brief,
+                    judge_def=judge_def,
+                    problem_class=problem_class,
+                    iteration=iteration,
+                    candidate=candidate,
+                    seed_candidate=seed_candidate,
+                    seed_scores=seed_scores,
+                    evaluator_output=evaluator_output,
+                    previous_asi=previous_asi,
+                    iteration_history=iteration_history,
+                    exploration_status=exploration_status,
+                    previous_deliberation=previous_deliberation,
+                    candidate_path=candidate_path,
+                    evaluator_path=evaluator_path,
+                    prior_candidate_paths=prior_candidate_paths,
+                    output_contract=brief.output_contract,
+                )
+                phase1_results[idx] = result
+            except Exception as exc:
+                phase1_errors.append((judge_def.name, exc))
 
-        for judge_def in judges:
-            tg.start_soon(_run_panelist, judge_def)
+        for idx, judge_def in enumerate(judges):
+            tg.start_soon(_run_panelist, idx, judge_def)
+
+    # Need at least 1 judge to proceed — if all failed, surface the details
+    if not phase1_results:
+        error_details = "; ".join(f"{name}: {exc}" for name, exc in phase1_errors)
+        raise RuntimeError(f"All {len(judges)} board judges failed: {error_details}")
+
+    # Deterministic ordering by original judge index
+    ordered_phase1 = [phase1_results[i] for i in sorted(phase1_results)]
 
     # -----------------------------------------------------------------------
     # Phase 2: Deliberation (one round)
@@ -464,7 +481,7 @@ async def dispatch_board(
     stripped_outputs: dict[str, str] = {}
     full_outputs: dict[str, str] = {}
     phase1_scores: dict[str, dict[str, int]] = {}
-    for name, raw_text, parsed in phase1_results:
+    for name, raw_text, parsed in ordered_phase1:
         stripped_outputs[name] = _strip_asi_from_output(raw_text)
         full_outputs[name] = raw_text
         phase1_scores[name] = parsed.scores
@@ -472,28 +489,35 @@ async def dispatch_board(
     deliberation_results: dict[str, str] = {}
     post_deliberation_scores: list[dict[str, int]] = []
 
+    delib_results: dict[int, tuple[str, str]] = {}
+    delib_errors: list[tuple[str, Exception]] = []
+
     async with anyio.create_task_group() as tg:
-        delib_results_list: list[tuple[str, str]] = []
+        async def _run_deliberation(idx: int, jname: str) -> None:
+            try:
+                others = [
+                    (oname, stripped_outputs[oname])
+                    for oname in stripped_outputs
+                    if oname != jname
+                ]
+                name, delib_text = await _deliberate_single(
+                    model=brief.clerk_model,
+                    judge_name=jname,
+                    own_output=full_outputs[jname],
+                    other_outputs=others,
+                    brief=brief,
+                )
+                delib_results[idx] = (name, delib_text)
+            except Exception as exc:
+                delib_errors.append((jname, exc))
 
-        async def _run_deliberation(jname: str) -> None:
-            others = [
-                (oname, stripped_outputs[oname])
-                for oname in stripped_outputs
-                if oname != jname
-            ]
-            name, delib_text = await _deliberate_single(
-                model=brief.clerk_model,
-                judge_name=jname,
-                own_output=full_outputs[jname],
-                other_outputs=others,
-                brief=brief,
-            )
-            delib_results_list.append((name, delib_text))
+        for idx, jname in enumerate(stripped_outputs):
+            tg.start_soon(_run_deliberation, idx, jname)
 
-        for jname in stripped_outputs:
-            tg.start_soon(_run_deliberation, jname)
+    # Deterministic ordering by original judge index
+    ordered_delib = [delib_results[i] for i in sorted(delib_results)]
 
-    for name, delib_text in delib_results_list:
+    for name, delib_text in ordered_delib:
         deliberation_results[name] = delib_text
         revised = _extract_revised_scores(
             delib_text,
@@ -502,6 +526,12 @@ async def dispatch_board(
         )
         post_deliberation_scores.append(revised)
 
+    # For judges whose deliberation failed, fall back to their Phase 1 scores
+    succeeded_delib_names = {name for name, _ in ordered_delib}
+    for name in phase1_scores:
+        if name not in succeeded_delib_names:
+            post_deliberation_scores.append(phase1_scores[name])
+
     # -----------------------------------------------------------------------
     # Phase 3: Synthesis
     # -----------------------------------------------------------------------
@@ -509,8 +539,8 @@ async def dispatch_board(
 
     synthesis_prompt = build_synthesis_prompt(
         criteria=brief.criteria,
-        all_judge_outputs=[(name, full_outputs[name]) for name, _, _ in phase1_results],
-        deliberation_results=[(name, deliberation_results.get(name, "")) for name, _, _ in phase1_results],
+        all_judge_outputs=[(name, full_outputs[name]) for name, _, _ in ordered_phase1],
+        deliberation_results=[(name, deliberation_results.get(name, "")) for name, _, _ in ordered_phase1],
         artifact_type=brief.artifact_type,
         search_space=brief.search_space,
         stable_wins=stable_wins,

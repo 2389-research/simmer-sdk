@@ -10,6 +10,8 @@ uv add simmer-sdk
 pip install simmer-sdk
 ```
 
+The PyPI package name is `simmer-sdk`; the import name is `simmer_sdk`.
+
 Requires `ANTHROPIC_API_KEY` set in your environment, AWS credentials for Bedrock mode, or a running Ollama instance for local models.
 
 ## Usage
@@ -87,7 +89,7 @@ result = await refine(
     ...,
     generator_model="claude-sonnet-4-6",  # default
     judge_model="claude-sonnet-4-6",      # default
-    clerk_model="claude-haiku-4-5",       # default, board synthesis + reflect
+    clerk_model="claude-haiku-4-5",       # default, board composition + deliberation + reflect
 )
 ```
 
@@ -108,7 +110,7 @@ result = await refine(
 )
 ```
 
-Model IDs are auto-mapped (e.g., `claude-sonnet-4-5` becomes `us.anthropic.claude-sonnet-4-5-20250929-v1:0`). You can also pass Bedrock model IDs directly. Requires `boto3` (included as a dependency).
+Model IDs are silently mapped to Bedrock format (e.g., `claude-sonnet-4-5` → `us.anthropic.claude-sonnet-4-5-20250929-v1:0`). Note: `claude-sonnet-4-6` and `claude-opus-4-6` are not yet available on Bedrock and are silently mapped to their 4.5 equivalents. You can also pass Bedrock model IDs directly to bypass mapping. Requires `boto3` (included as a dependency).
 
 ### Ollama (Local Models)
 
@@ -159,7 +161,8 @@ async def on_iteration(record, trajectory, trajectory_table):
     print(trajectory_table)
 
 async def on_plateau(trajectory):
-    """Called when 3 iterations without improvement. Return True to upgrade to board."""
+    """Called when 3 iterations without improvement. Only triggered in judge_mode="single".
+    Return True to upgrade to board and extend the run by 2 iterations."""
     return True
 
 result = await refine(..., on_iteration=on_iteration, on_plateau=on_plateau)

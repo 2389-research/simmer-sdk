@@ -1,3 +1,6 @@
+# ABOUTME: Built-in judge primitive library for board composition.
+# ABOUTME: Provides domain-specific evaluation primitives matched to problem characteristics.
+
 """Judge Primitive Library — building blocks for constructing judges on a board panel."""
 
 # CORE_PRIMITIVES: apply to all judges

@@ -1,3 +1,6 @@
+# ABOUTME: API client factory for Anthropic, AWS Bedrock, and Ollama providers.
+# ABOUTME: Handles model ID mapping, CLI path resolution, and agent environment setup.
+
 """Client factory for Anthropic API, AWS Bedrock, and Ollama.
 
 When api_provider="bedrock", creates AsyncAnthropicBedrock clients and maps
@@ -76,6 +79,7 @@ def create_async_client(brief: SetupBrief):
             aws_access_key=brief.aws_access_key,
             aws_secret_key=brief.aws_secret_key,
             aws_region=brief.aws_region,
+            max_retries=3,
         )
     elif brief.api_provider == "ollama":
         from anthropic import AsyncAnthropic
@@ -85,7 +89,7 @@ def create_async_client(brief: SetupBrief):
         )
     else:
         from anthropic import AsyncAnthropic
-        return AsyncAnthropic()
+        return AsyncAnthropic(max_retries=3)
 
 
 def map_model_id(model: str, brief: SetupBrief) -> str:

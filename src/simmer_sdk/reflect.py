@@ -1,10 +1,16 @@
+# ABOUTME: Trajectory tracking, regression detection, plateau analysis, stable wins.
+# ABOUTME: Pure Python functions for iteration math plus LLM-based reflect dispatch.
+
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from simmer_sdk.types import IterationRecord, StableWins
+logger = logging.getLogger(__name__)
+
+from simmer_sdk.types import IterationRecord, SetupBrief, StableWins
 
 
 # ---------------------------------------------------------------------------
@@ -198,12 +204,15 @@ def condense_key_change(report: str) -> str:
     return text.strip() or "update"
 
 
-async def condense_key_change_llm(report: str, model: str = "claude-haiku-4-5") -> str:
+async def condense_key_change_llm(report: str, brief: SetupBrief | None = None, model: str = "claude-haiku-4-5") -> str:
     """Condense a generator report to a meaningful key_change using an LLM.
 
     The key_change is used in the trajectory table, stable wins tracking,
     and exploration status — it needs to be semantically meaningful, not
     just truncated. Uses the clerk model (haiku) for one cheap call.
+
+    Accepts an optional brief to route through the configured provider
+    (e.g. Bedrock). Falls back to direct Anthropic when brief is None.
 
     Returns under 60 characters capturing WHAT changed, not WHY.
     Falls back to regex condensation if the LLM call fails.
@@ -211,10 +220,16 @@ async def condense_key_change_llm(report: str, model: str = "claude-haiku-4-5") 
     if not report or report == "seed":
         return report
     try:
-        import anthropic
-        client = anthropic.AsyncAnthropic()
+        if brief:
+            from simmer_sdk.client import create_async_client, map_model_id
+            client = create_async_client(brief)
+            resolved_model = map_model_id(model, brief)
+        else:
+            import anthropic
+            client = anthropic.AsyncAnthropic()
+            resolved_model = model
         response = await client.messages.create(
-            model=model,
+            model=resolved_model,
             max_tokens=80,
             messages=[{
                 "role": "user",
@@ -232,7 +247,7 @@ async def condense_key_change_llm(report: str, model: str = "claude-haiku-4-5") 
         if len(result) <= 60 and result:
             return result
     except Exception:
-        pass
+        logger.debug("condense_key_change_llm failed, falling back to regex", exc_info=True)
     return condense_key_change(report)
 
 
@@ -266,9 +281,10 @@ def format_trajectory_table(
         best_scores = trajectory[best_idx].scores
         best_composite = sum(best_scores.values()) / len(best_scores) if best_scores else 0.0
 
+    best_iter = trajectory[best_idx].iteration if best_idx < len(trajectory) else best_idx
     table_lines = [header_line, sep_line] + rows
     table_lines.append("")
-    table_lines.append(f"Best candidate: iteration {best_idx} (composite: {best_composite:.1f}/10)")
+    table_lines.append(f"Best candidate: iteration {best_iter} (composite: {best_composite:.1f}/10)")
 
     return "\n".join(table_lines)
 

@@ -1,3 +1,6 @@
+# ABOUTME: Generator subagent dispatch and output parsing.
+# ABOUTME: Sends candidates to Claude Agent SDK for improvement based on ASI feedback.
+
 from __future__ import annotations
 
 import re
