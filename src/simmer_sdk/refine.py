@@ -292,11 +292,13 @@ async def refine(
     generator_model: str = "claude-sonnet-4-6",
     judge_model: str = "claude-sonnet-4-6",
     clerk_model: str = "claude-haiku-4-5",
-    # Optional — API provider (Bedrock support)
+    # Optional — API provider
     api_provider: str = "anthropic",
     aws_access_key: str | None = None,
     aws_secret_key: str | None = None,
     aws_region: str | None = None,
+    ollama_url: str = "http://localhost:11434",
+    judge_preamble: str | None = None,
     # Optional — callbacks
     on_iteration: OnIterationCallback | None = None,
     on_plateau: OnPlateauCallback | None = None,
@@ -319,7 +321,7 @@ async def refine(
     valid_judge_modes = {"auto", "single", "board"}
     if judge_mode not in valid_judge_modes:
         raise ValueError(f"judge_mode must be one of {valid_judge_modes}, got {judge_mode!r}")
-    valid_providers = {"anthropic", "bedrock"}
+    valid_providers = {"anthropic", "bedrock", "ollama"}
     if api_provider not in valid_providers:
         raise ValueError(f"api_provider must be one of {valid_providers}, got {api_provider!r}")
     if judge_count < 2:
@@ -362,6 +364,8 @@ async def refine(
         aws_access_key=aws_access_key,
         aws_secret_key=aws_secret_key,
         aws_region=aws_region,
+        ollama_url=ollama_url,
+        judge_preamble=judge_preamble,
     )
 
     brief = resolve_brief(brief)

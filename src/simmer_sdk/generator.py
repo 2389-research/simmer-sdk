@@ -101,6 +101,19 @@ async def dispatch_generator(
     else:
         tools = ["Read", "Write", "Glob"]
 
+    # Local mode: use Ollama agent loop instead of Claude CLI
+    if brief.api_provider == "ollama":
+        from simmer_sdk.local_agent import run_local_agent
+        result_text = await run_local_agent(
+            prompt=prompt,
+            model=brief.generator_model,
+            ollama_url=brief.ollama_url,
+            tools=tools,
+            cwd=workspace_path if is_workspace else brief.output_dir,
+            max_turns=20,
+        )
+        return _parse_generator_output(result_text, brief)
+
     from simmer_sdk.client import map_model_id, get_agent_env, get_cli_path
     options = ClaudeAgentOptions(
         tools=tools,

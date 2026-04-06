@@ -151,6 +151,12 @@ async def dispatch_judge(
     is_workspace = brief.artifact_type == "workspace"
     workspace_path: Optional[str] = brief.artifact if is_workspace else None
 
+    # Resolve judge preamble: use explicit value, or local default for ollama
+    preamble = brief.judge_preamble
+    if preamble is None and brief.api_provider == "ollama":
+        from simmer_sdk.prompts import LOCAL_JUDGE_PREAMBLE
+        preamble = LOCAL_JUDGE_PREAMBLE
+
     prompt = build_judge_prompt(
         iteration=iteration,
         artifact_type=brief.artifact_type,
@@ -168,7 +174,23 @@ async def dispatch_judge(
         candidate_path=candidate_path,
         evaluator_path=evaluator_path,
         prior_candidate_paths=prior_candidate_paths,
+        judge_preamble=preamble,
     )
+
+    # Local mode: use Ollama agent loop instead of Claude CLI
+    if brief.api_provider == "ollama":
+        from simmer_sdk.local_agent import run_local_agent
+        result_text = await run_local_agent(
+            prompt=prompt,
+            model=brief.judge_model,
+            ollama_url=brief.ollama_url,
+            tools=["Read", "Grep", "Glob"],
+            cwd=workspace_path if is_workspace else brief.output_dir,
+            max_turns=25,
+        )
+        output = parse_judge_output(result_text, brief.criteria)
+        output.raw_text = result_text
+        return output
 
     from simmer_sdk.client import map_model_id, get_agent_env, get_cli_path
     max_turns = 25

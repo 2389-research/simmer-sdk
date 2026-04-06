@@ -88,6 +88,8 @@ def test_setup_brief_defaults():
     assert brief.generator_model == "claude-sonnet-4-6"
     assert brief.judge_model == "claude-sonnet-4-6"
     assert brief.clerk_model == "claude-haiku-4-5"
+    assert brief.api_provider == "anthropic"
+    assert brief.ollama_url == "http://localhost:11434"
 
 
 def test_judge_output_construction():
