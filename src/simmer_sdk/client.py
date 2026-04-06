@@ -21,15 +21,13 @@ from simmer_sdk.types import SetupBrief
 
 # Bedrock model ID mapping — callers can pass direct API names and we translate
 BEDROCK_MODEL_MAP = {
-    # Current models with full date-stamped Bedrock IDs
-    "claude-sonnet-4-6": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",  # 4.6 not yet on Bedrock, use 4.5
-    "claude-sonnet-4-5": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    # Current models
+    "claude-sonnet-4-6": "us.anthropic.claude-sonnet-4-6",
+    "claude-opus-4-6": "us.anthropic.claude-opus-4-6-v1",
     "claude-haiku-4-5": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "claude-opus-4-6": "us.anthropic.claude-opus-4-5-20251101-v1:0",  # 4.6 not yet on Bedrock, use 4.5
+    # Legacy 4.5 aliases (still valid but superseded by 4.6)
+    "claude-sonnet-4-5": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
     "claude-opus-4-5": "us.anthropic.claude-opus-4-5-20251101-v1:0",
-    # Direct API date-stamped IDs
-    "claude-sonnet-4-5-20250929": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-    "claude-haiku-4-5-20251001": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
 }
 
 # Common Ollama model suggestions — not exhaustive, users can pass any Ollama tag.

@@ -110,7 +110,7 @@ result = await refine(
 )
 ```
 
-Model IDs are silently mapped to Bedrock format (e.g., `claude-sonnet-4-5` → `us.anthropic.claude-sonnet-4-5-20250929-v1:0`). Note: `claude-sonnet-4-6` and `claude-opus-4-6` are not yet available on Bedrock and are silently mapped to their 4.5 equivalents. You can also pass Bedrock model IDs directly to bypass mapping. Requires `boto3` (included as a dependency).
+Model IDs are auto-mapped to Bedrock format (e.g., `claude-sonnet-4-6` → `us.anthropic.claude-sonnet-4-6-20260217-v1:0`). You can also pass Bedrock model IDs directly to bypass mapping. Requires `boto3` (included as a dependency).
 
 ### Ollama (Local Models)
 
