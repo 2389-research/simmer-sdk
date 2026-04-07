@@ -295,14 +295,17 @@ async def run_local_agent(
                 tool_defs.append(TOOL_SCHEMAS[local_name])
                 available_tools[local_name] = TOOL_FUNCTIONS[local_name]
 
-    # Register custom tools
+    # Register custom tools — use the schema's function name as the lookup key
+    # (that's what the LLM will call)
     if custom_tools:
         for tool_name, tool_def in custom_tools.items():
             schema = tool_def.get("schema")
             fn = tool_def.get("function")
             if schema and fn:
                 tool_defs.append(schema)
-                available_tools[tool_name] = fn
+                # Register by the name the LLM sees in the schema
+                schema_name = schema.get("function", {}).get("name", tool_name)
+                available_tools[schema_name] = fn
 
     messages: list[dict] = [{"role": "user", "content": prompt}]
 
