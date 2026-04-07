@@ -109,6 +109,7 @@ async def dispatch_generator(
             model=brief.generator_model,
             ollama_url=brief.ollama_url,
             tools=tools,
+            custom_tools=brief.custom_tools,
             cwd=workspace_path if is_workspace else brief.output_dir,
             max_turns=20,
         )

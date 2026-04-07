@@ -664,6 +664,7 @@ async def dispatch_reflect(
             model=brief.clerk_model,
             ollama_url=brief.ollama_url,
             tools=["Read", "Write", "Glob"],
+            custom_tools=brief.custom_tools if brief else None,
             cwd=str(output_dir),
             max_turns=5,
         )

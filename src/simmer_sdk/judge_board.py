@@ -236,6 +236,7 @@ async def _dispatch_single_panelist(
             model=brief.judge_model,
             ollama_url=brief.ollama_url,
             tools=["Read", "Grep", "Glob"],
+            custom_tools=brief.custom_tools,
             cwd=workspace_path if is_workspace else brief.output_dir,
             max_turns=25,
         )
