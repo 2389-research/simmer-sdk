@@ -299,6 +299,7 @@ async def refine(
     aws_region: str | None = None,
     ollama_url: str = "http://localhost:11434",
     judge_preamble: str | None = None,
+    custom_tools: dict | None = None,
     # Optional — callbacks
     on_iteration: OnIterationCallback | None = None,
     on_plateau: OnPlateauCallback | None = None,
@@ -366,6 +367,7 @@ async def refine(
         aws_region=aws_region,
         ollama_url=ollama_url,
         judge_preamble=judge_preamble,
+        custom_tools=custom_tools,
     )
 
     brief = resolve_brief(brief)

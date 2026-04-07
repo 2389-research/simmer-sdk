@@ -255,6 +255,7 @@ async def run_local_agent(
     model: str,
     ollama_url: str = "http://localhost:11434",
     tools: Optional[list[str]] = None,
+    custom_tools: Optional[dict[str, dict]] = None,
     cwd: Optional[str] = None,
     max_turns: int = 20,
 ) -> str:
@@ -264,8 +265,13 @@ async def run_local_agent(
         prompt: The initial prompt/task for the agent.
         model: Ollama model tag (e.g., "gemma4:31b").
         ollama_url: Ollama server URL.
-        tools: List of tool names the agent can use (e.g., ["Read", "Grep", "Glob"]).
-            Uses simmer-style capitalized names, mapped internally.
+        tools: List of built-in tool names (e.g., ["Read", "Grep", "Glob"]).
+        custom_tools: Dict of custom tools to make available. Each entry:
+            {"tool_name": {"function": callable, "schema": {...}}}
+            Schema follows OpenAI function calling format:
+            {"type": "function", "function": {"name": "...", "description": "...",
+             "parameters": {...}}}
+            Functions can be sync or async. Async functions are awaited.
         cwd: Working directory for file operations.
         max_turns: Maximum number of tool-call rounds.
 
@@ -279,7 +285,7 @@ async def run_local_agent(
         api_key="ollama",
     )
 
-    # Build tool list from requested tools
+    # Build tool list from requested built-in tools + custom tools
     tool_defs = []
     available_tools: dict[str, Any] = {}
     if tools:
@@ -288,6 +294,18 @@ async def run_local_agent(
             if local_name in TOOL_SCHEMAS:
                 tool_defs.append(TOOL_SCHEMAS[local_name])
                 available_tools[local_name] = TOOL_FUNCTIONS[local_name]
+
+    # Register custom tools — use the schema's function name as the lookup key
+    # (that's what the LLM will call)
+    if custom_tools:
+        for tool_name, tool_def in custom_tools.items():
+            schema = tool_def.get("schema")
+            fn = tool_def.get("function")
+            if schema and fn:
+                tool_defs.append(schema)
+                # Register by the name the LLM sees in the schema
+                schema_name = schema.get("function", {}).get("name", tool_name)
+                available_tools[schema_name] = fn
 
     messages: list[dict] = [{"role": "user", "content": prompt}]
 
@@ -366,10 +384,14 @@ async def run_local_agent(
 
                     logger.debug(f"  Tool: {fn_name}({list(fn_args.keys())})")
 
-                    # Execute the tool
+                    # Execute the tool (supports both sync and async functions)
                     fn = available_tools.get(fn_name)
                     if fn:
-                        result = fn(**fn_args)
+                        import inspect
+                        if inspect.iscoroutinefunction(fn):
+                            result = await fn(**fn_args)
+                        else:
+                            result = fn(**fn_args)
                     else:
                         result = f"Error: unknown tool '{fn_name}'"
 

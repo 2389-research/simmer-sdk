@@ -90,6 +90,7 @@ class SetupBrief:
     aws_region: str | None = None
     ollama_url: str = "http://localhost:11434"
     judge_preamble: str | None = None  # Optional preamble injected into judge prompts
+    custom_tools: dict | None = None  # Custom tools for local agent {"name": {"function": fn, "schema": {...}}}
 
 
 @dataclass
