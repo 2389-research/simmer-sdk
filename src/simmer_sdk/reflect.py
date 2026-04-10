@@ -692,6 +692,13 @@ async def dispatch_reflect(
             async for message in client.receive_response():
                 if isinstance(message, ResultMessage):
                     reflect_text = (message.result or "") if hasattr(message, "result") else str(message)
+                    if brief and hasattr(brief, "_usage_tracker") and brief._usage_tracker:
+                        usage = getattr(message, "usage", None) or {}
+                        brief._usage_tracker.record_tokens(
+                            model=brief.clerk_model, role="reflect",
+                            input_tokens=usage.get("input_tokens", 0),
+                            output_tokens=usage.get("output_tokens", 0),
+                        )
 
     # Ensure reflect_text is a string
     if not reflect_text:

@@ -20,10 +20,7 @@ import anyio
 
 from simmer_sdk import refine
 
-# Bedrock creds — pull from env or orrery's .env
-AWS_ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY", "")
-AWS_SECRET_KEY = os.environ.get("AWS_SECRET_KEY", "")
-AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+# Bedrock creds loaded at runtime from env or orrery's .env
 
 ARTIFACT = (
     "A one-shot DND adventure hook for a party of 4 level-5 characters. "
@@ -101,9 +98,9 @@ async def run_config(config: dict, output_base: Path) -> dict:
         clerk_model=config["clerk_model"],
         split_generator=config["split_generator"],
         api_provider="bedrock",
-        aws_access_key=AWS_ACCESS_KEY,
-        aws_secret_key=AWS_SECRET_KEY,
-        aws_region=AWS_REGION,
+        aws_access_key=os.environ.get("AWS_ACCESS_KEY", ""),
+        aws_secret_key=os.environ.get("AWS_SECRET_KEY", ""),
+        aws_region=os.environ.get("AWS_REGION", "us-east-1"),
     )
     elapsed = (datetime.now() - start).total_seconds()
 
@@ -139,22 +136,25 @@ async def run_config(config: dict, output_base: Path) -> dict:
     return summary
 
 
+def _load_aws_creds():
+    """Load AWS creds from env or orrery .env file."""
+    if os.environ.get("AWS_ACCESS_KEY"):
+        return
+    env_path = Path.home() / "Documents/GitHub/Noospheric-Orrery/.env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                os.environ[k.strip()] = v.strip()
+
+
 async def main():
-    if not AWS_ACCESS_KEY:
-        # Try loading from orrery .env
-        env_path = Path.home() / "Documents/GitHub/Noospheric-Orrery/.env"
-        if env_path.exists():
-            for line in env_path.read_text().splitlines():
-                if "=" in line and not line.startswith("#"):
-                    k, v = line.split("=", 1)
-                    os.environ[k.strip()] = v.strip()
+    _load_aws_creds()
+    aws_key = os.environ.get("AWS_ACCESS_KEY", "")
+    aws_secret = os.environ.get("AWS_SECRET_KEY", "")
+    aws_region = os.environ.get("AWS_REGION", "us-east-1")
 
-        global AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION
-        AWS_ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY", "")
-        AWS_SECRET_KEY = os.environ.get("AWS_SECRET_KEY", "")
-        AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
-
-    if not AWS_ACCESS_KEY:
+    if not os.environ.get("AWS_ACCESS_KEY"):
         print("ERROR: No AWS credentials. Set AWS_ACCESS_KEY/AWS_SECRET_KEY or have orrery .env available.")
         return
 
