@@ -266,12 +266,7 @@ async def _dispatch_single_panelist(
             if isinstance(message, ResultMessage):
                 result_text = message.result if hasattr(message, "result") else str(message)
                 if hasattr(brief, "_usage_tracker") and brief._usage_tracker:
-                    usage = getattr(message, "usage", None) or {}
-                    brief._usage_tracker.record_tokens(
-                        model=brief.judge_model, role="judge",
-                        input_tokens=usage.get("input_tokens", 0),
-                        output_tokens=usage.get("output_tokens", 0),
-                    )
+                    brief._usage_tracker.record_agent(brief.judge_model, "judge", message)
 
     parsed = parse_judge_output(result_text, brief.criteria)
     return judge_def.name, result_text, parsed

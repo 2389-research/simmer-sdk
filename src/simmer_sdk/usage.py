@@ -44,6 +44,9 @@ class CallRecord:
 
     @property
     def estimated_cost(self) -> float:
+        # Use CLI-reported cost for agent calls if available
+        if hasattr(self, "_agent_cost"):
+            return self._agent_cost
         pricing = PRICING.get(self.model)
         if not pricing:
             return 0.0
@@ -73,6 +76,25 @@ class UsageTracker:
             model=model, role=role,
             input_tokens=input_tokens, output_tokens=output_tokens,
         ))
+
+    def record_agent(self, model: str, role: str, result_message) -> None:
+        """Record usage from a Claude Agent SDK ResultMessage.
+
+        The ResultMessage.usage dict only has the final turn's tokens,
+        but total_cost_usd aggregates the entire multi-turn session.
+        We store both — tokens are approximate, cost is accurate.
+        """
+        usage = getattr(result_message, "usage", None) or {}
+        cost = getattr(result_message, "total_cost_usd", None)
+        record = CallRecord(
+            model=model, role=role,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+        )
+        # Override estimated cost with the CLI's reported cost if available
+        if cost is not None:
+            record._agent_cost = cost  # type: ignore[attr-defined]
+        self.calls.append(record)
 
     @property
     def total_input_tokens(self) -> int:

@@ -223,14 +223,7 @@ async def dispatch_generator(
         async for message in client.receive_response():
             if isinstance(message, ResultMessage):
                 result_text = message.result if hasattr(message, "result") else str(message)
-                # Track usage from Agent SDK
                 if hasattr(brief, "_usage_tracker") and brief._usage_tracker:
-                    usage = getattr(message, "usage", None) or {}
-                    brief._usage_tracker.record_tokens(
-                        model=brief.generator_model,
-                        role="generator",
-                        input_tokens=usage.get("input_tokens", 0),
-                        output_tokens=usage.get("output_tokens", 0),
-                    )
+                    brief._usage_tracker.record_agent(brief.generator_model, "generator", message)
 
     return _parse_generator_output(result_text, brief)
