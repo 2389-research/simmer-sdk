@@ -92,16 +92,16 @@ async def _split_generate(
         architect_prompt += f"REGRESSION NOTE:\n{regression_note}\n\n"
 
     architect_prompt += (
-        "Write a DETAILED CONTRACT for how to improve this artifact. "
-        "A junior writer will follow your contract to produce the new version.\n\n"
-        "Your contract must specify:\n"
-        "1. PRESERVE: What sections/elements to keep exactly as-is\n"
-        "2. MODIFY: What to change, with exact instructions for each change\n"
-        "3. ADD: What new content to create, with detailed specs\n"
-        "4. REMOVE: What to cut\n"
-        "5. STRUCTURE: The overall organization of the final output\n\n"
-        "Be specific enough that someone who hasn't seen the ASI reasoning "
-        "could follow your contract and produce the right result."
+        "Write a CONTRACT for a less capable model to execute. "
+        "You make the architectural decisions — structure, what goes where, "
+        "what specific content to include. The executor writes it out.\n\n"
+        "Your contract should:\n"
+        "- Specify the exact structure (sections, order, approximate length)\n"
+        "- Make every important content decision (names, concepts, specifics)\n"
+        "- State what to preserve from the current version\n"
+        "- State what NOT to do (common mistakes to avoid)\n\n"
+        "Think of it like writing a detailed ticket for a junior colleague. "
+        "They can write well but shouldn't be making design decisions."
     )
 
     architect_model = map_model_id(brief.generator_model, brief)
@@ -117,23 +117,55 @@ async def _split_generate(
 
     # Step 2: Executor produces the artifact from the contract
     executor_prompt = (
-        f"You are a skilled writer executing a contract to improve an artifact.\n\n"
-        f"CURRENT ARTIFACT:\n{current_candidate}\n\n"
-        f"CONTRACT (follow exactly):\n{contract}\n\n"
-        f"Produce the complete improved artifact. Output ONLY the artifact text — "
-        f"no commentary, no explanation of changes, no preamble."
+        f"You are a writer executing a contract. The contract specifies the STRUCTURE, "
+        f"CONTENT, and RULES. Your job is to write excellent prose that follows the "
+        f"contract exactly. Do not make structural decisions — those are decided for you.\n\n"
+        f"CURRENT ARTIFACT (reference for style and any preserved content):\n{current_candidate}\n\n"
+        f"CONTRACT (follow exactly — every name, plot point, and structure is specified):\n{contract}\n\n"
+        f"Output ONLY the complete artifact. No commentary, no explanations."
     )
 
-    executor_model = map_model_id(brief.clerk_model, brief)
-    executor_response = await client.messages.create(
-        model=executor_model,
-        max_tokens=16384,
-        messages=[{"role": "user", "content": executor_prompt}],
-    )
-    candidate = extract_text(executor_response)
+    # Resolve executor model — defaults to clerk_model if not specified
+    exec_model_name = brief.executor_model or brief.clerk_model
+    exec_model_id = map_model_id(exec_model_name, brief)
 
-    if hasattr(brief, "_usage_tracker") and brief._usage_tracker:
-        brief._usage_tracker.record(executor_model, "generator_executor", executor_response)
+    # Route: Anthropic SDK for Claude models, Bedrock Converse API for everything else
+    from simmer_sdk.client import is_anthropic_model
+    if is_anthropic_model(exec_model_id):
+        executor_response = await client.messages.create(
+            model=exec_model_id,
+            max_tokens=16384,
+            messages=[{"role": "user", "content": executor_prompt}],
+        )
+        candidate = extract_text(executor_response)
+        if hasattr(brief, "_usage_tracker") and brief._usage_tracker:
+            brief._usage_tracker.record(exec_model_id, "generator_executor", executor_response)
+    else:
+        # Non-Anthropic Bedrock model (Nova, Llama, Mistral, etc.)
+        from simmer_sdk.client import invoke_bedrock_model
+        candidate, usage_dict = await invoke_bedrock_model(
+            model_id=exec_model_id,
+            prompt=executor_prompt,
+            brief=brief,
+            max_tokens=8192,  # Some models cap lower than 16K
+        )
+        if hasattr(brief, "_usage_tracker") and brief._usage_tracker:
+            brief._usage_tracker.record_tokens(
+                exec_model_id, "generator_executor",
+                usage_dict.get("input_tokens", 0),
+                usage_dict.get("output_tokens", 0),
+            )
+
+    # Save contract to disk for inspection
+    import os
+    out_dir = brief.output_dir
+    if out_dir:
+        contract_path = os.path.join(out_dir, f"iteration-{iteration}-contract.md")
+        try:
+            with open(contract_path, "w") as f:
+                f.write(contract)
+        except Exception:
+            pass
 
     return GeneratorOutput(
         candidate=candidate,

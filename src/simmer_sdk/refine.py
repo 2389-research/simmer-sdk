@@ -301,6 +301,7 @@ async def refine(
     judge_preamble: str | None = None,
     custom_tools: dict | None = None,
     split_generator: bool = False,
+    executor_model: str | None = None,
     # Optional — callbacks
     on_iteration: OnIterationCallback | None = None,
     on_plateau: OnPlateauCallback | None = None,
@@ -370,6 +371,7 @@ async def refine(
         judge_preamble=judge_preamble,
         custom_tools=custom_tools,
         split_generator=split_generator,
+        executor_model=executor_model,
     )
 
     brief = resolve_brief(brief)

@@ -21,6 +21,15 @@ PRICING: dict[str, tuple[float, float]] = {
     "claude-haiku-4-5": (0.80, 4.00),
     "claude-opus-4-6": (15.00, 75.00),
     "claude-opus-4-5": (15.00, 75.00),
+    # Amazon Nova
+    "amazon.nova-micro-v1:0": (0.035, 0.14),
+    "amazon.nova-lite-v1:0": (0.06, 0.24),
+    "amazon.nova-pro-v1:0": (0.80, 3.20),
+    # Llama 4
+    "meta.llama4-scout-17b-16e-instruct-v1:0": (0.27, 0.35),
+    "meta.llama4-maverick-17b-128e-instruct-v1:0": (0.40, 0.60),
+    # Mistral
+    "mistral.mistral-small-2402-v1:0": (0.10, 0.30),
     # Bedrock IDs map to same pricing
     "us.anthropic.claude-sonnet-4-6": (3.00, 15.00),
     "us.anthropic.claude-sonnet-4-5-20250929-v1:0": (3.00, 15.00),
