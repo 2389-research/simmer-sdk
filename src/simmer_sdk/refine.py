@@ -300,6 +300,7 @@ async def refine(
     ollama_url: str = "http://localhost:11434",
     judge_preamble: str | None = None,
     custom_tools: dict | None = None,
+    split_generator: bool = False,
     # Optional — callbacks
     on_iteration: OnIterationCallback | None = None,
     on_plateau: OnPlateauCallback | None = None,
@@ -368,11 +369,17 @@ async def refine(
         ollama_url=ollama_url,
         judge_preamble=judge_preamble,
         custom_tools=custom_tools,
+        split_generator=split_generator,
     )
 
     brief = resolve_brief(brief)
     original_description = brief.artifact
     problem_class = classify_problem(brief)
+
+    # Usage tracking — attach to brief so all call sites can record
+    from simmer_sdk.usage import UsageTracker
+    usage_tracker = UsageTracker()
+    brief._usage_tracker = usage_tracker  # type: ignore[attr-defined]
 
     out_path = Path(brief.output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -718,4 +725,5 @@ async def refine(
         stable_wins=final_stable_wins.working,
         not_working=final_stable_wins.not_working,
         output_dir=out_path,
+        usage=usage_tracker,
     )

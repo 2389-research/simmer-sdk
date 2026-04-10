@@ -61,6 +61,86 @@ def _parse_generator_output(result_text: str, brief: SetupBrief) -> GeneratorOut
     )
 
 
+async def _split_generate(
+    brief: SetupBrief,
+    iteration: int,
+    current_candidate: str,
+    asi: str,
+    original_description: str | None = None,
+    regression_note: str | None = None,
+) -> GeneratorOutput:
+    """Split generator: architect (generator_model) plans, executor (clerk_model) writes.
+
+    The architect model writes a detailed contract specifying exactly what
+    changes to make. The executor model takes the contract + current artifact
+    and produces the full new version. This lets a stronger model direct a
+    cheaper model, reducing output token cost.
+    """
+    from simmer_sdk.client import create_async_client, map_model_id, extract_text
+
+    client = create_async_client(brief)
+
+    # Step 1: Architect writes the contract
+    architect_prompt = (
+        f"You are the architect in a simmer refinement loop (iteration {iteration}).\n\n"
+        f"CURRENT ARTIFACT:\n{current_candidate}\n\n"
+        f"ASI (single most impactful improvement):\n{asi}\n\n"
+    )
+    if original_description:
+        architect_prompt += f"ORIGINAL DESCRIPTION:\n{original_description}\n\n"
+    if regression_note:
+        architect_prompt += f"REGRESSION NOTE:\n{regression_note}\n\n"
+
+    architect_prompt += (
+        "Write a DETAILED CONTRACT for how to improve this artifact. "
+        "A junior writer will follow your contract to produce the new version.\n\n"
+        "Your contract must specify:\n"
+        "1. PRESERVE: What sections/elements to keep exactly as-is\n"
+        "2. MODIFY: What to change, with exact instructions for each change\n"
+        "3. ADD: What new content to create, with detailed specs\n"
+        "4. REMOVE: What to cut\n"
+        "5. STRUCTURE: The overall organization of the final output\n\n"
+        "Be specific enough that someone who hasn't seen the ASI reasoning "
+        "could follow your contract and produce the right result."
+    )
+
+    architect_model = map_model_id(brief.generator_model, brief)
+    architect_response = await client.messages.create(
+        model=architect_model,
+        max_tokens=4096,
+        messages=[{"role": "user", "content": architect_prompt}],
+    )
+    contract = extract_text(architect_response)
+
+    if hasattr(brief, "_usage_tracker") and brief._usage_tracker:
+        brief._usage_tracker.record(architect_model, "generator_architect", architect_response)
+
+    # Step 2: Executor produces the artifact from the contract
+    executor_prompt = (
+        f"You are a skilled writer executing a contract to improve an artifact.\n\n"
+        f"CURRENT ARTIFACT:\n{current_candidate}\n\n"
+        f"CONTRACT (follow exactly):\n{contract}\n\n"
+        f"Produce the complete improved artifact. Output ONLY the artifact text — "
+        f"no commentary, no explanation of changes, no preamble."
+    )
+
+    executor_model = map_model_id(brief.clerk_model, brief)
+    executor_response = await client.messages.create(
+        model=executor_model,
+        max_tokens=16384,
+        messages=[{"role": "user", "content": executor_prompt}],
+    )
+    candidate = extract_text(executor_response)
+
+    if hasattr(brief, "_usage_tracker") and brief._usage_tracker:
+        brief._usage_tracker.record(executor_model, "generator_executor", executor_response)
+
+    return GeneratorOutput(
+        candidate=candidate,
+        report=f"[split-gen] Contract: {contract[:200]}",
+    )
+
+
 async def dispatch_generator(
     brief: SetupBrief,
     iteration: int,
@@ -72,6 +152,17 @@ async def dispatch_generator(
     regression_note: str | None = None,
 ) -> GeneratorOutput:
     """Dispatch the generator subagent via the Claude Agent SDK."""
+    # Split generator: architect plans, executor writes
+    if brief.split_generator and brief.artifact_type != "workspace":
+        return await _split_generate(
+            brief=brief,
+            iteration=iteration,
+            current_candidate=current_candidate,
+            asi=asi,
+            original_description=original_description,
+            regression_note=regression_note,
+        )
+
     is_workspace = brief.artifact_type == "workspace"
 
     workspace_path: str | None = None

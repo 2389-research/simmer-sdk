@@ -206,3 +206,4 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 tests/orrery_runs/
+tests/config_comparison/
