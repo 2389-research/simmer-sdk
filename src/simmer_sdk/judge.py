@@ -212,6 +212,8 @@ async def dispatch_judge(
         async for message in client.receive_response():
             if isinstance(message, ResultMessage):
                 result_text = message.result if hasattr(message, "result") else str(message)
+                if hasattr(brief, "_usage_tracker") and brief._usage_tracker:
+                    brief._usage_tracker.record_agent(brief.judge_model, "judge", message)
 
     output = parse_judge_output(result_text, brief.criteria)
     output.raw_text = result_text

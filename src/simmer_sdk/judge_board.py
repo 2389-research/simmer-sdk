@@ -121,11 +121,14 @@ async def compose_judges(
 
     from simmer_sdk.client import create_async_client, map_model_id
     client = create_async_client(brief)
+    resolved_model = map_model_id(brief.clerk_model, brief)
     response = await client.messages.create(
-        model=map_model_id(brief.clerk_model, brief),
+        model=resolved_model,
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
     )
+    if hasattr(brief, "_usage_tracker") and brief._usage_tracker:
+        brief._usage_tracker.record(resolved_model, "clerk", response)
     from simmer_sdk.client import extract_text
     text = extract_text(response)
 
@@ -262,6 +265,8 @@ async def _dispatch_single_panelist(
         async for message in client.receive_response():
             if isinstance(message, ResultMessage):
                 result_text = message.result if hasattr(message, "result") else str(message)
+                if hasattr(brief, "_usage_tracker") and brief._usage_tracker:
+                    brief._usage_tracker.record_agent(brief.judge_model, "judge", message)
 
     parsed = parse_judge_output(result_text, brief.criteria)
     return judge_def.name, result_text, parsed
@@ -300,6 +305,8 @@ async def _deliberate_single(
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
     )
+    if brief and hasattr(brief, "_usage_tracker") and brief._usage_tracker:
+        brief._usage_tracker.record(resolved_model, "clerk", response)
     from simmer_sdk.client import extract_text
     return judge_name, extract_text(response)
 
@@ -551,11 +558,14 @@ async def dispatch_board(
     # distilling board deliberation into a single ASI.
     from simmer_sdk.client import create_async_client, map_model_id
     client = create_async_client(brief)
+    resolved_synth_model = map_model_id(brief.judge_model, brief)
     response = await client.messages.create(
-        model=map_model_id(brief.judge_model, brief),
+        model=resolved_synth_model,
         max_tokens=4096,
         messages=[{"role": "user", "content": synthesis_prompt}],
     )
+    if hasattr(brief, "_usage_tracker") and brief._usage_tracker:
+        brief._usage_tracker.record(resolved_synth_model, "clerk", response)
     from simmer_sdk.client import extract_text
     synthesis_text = extract_text(response)
 

@@ -12,6 +12,7 @@ from simmer_sdk.types import (
     StableWins,
 )
 from simmer_sdk.refine import refine
+from simmer_sdk.usage import UsageTracker
 
 __all__ = [
     "IterationRecord",
@@ -21,5 +22,6 @@ __all__ = [
     "OnPlateauCallback",
     "SetupBrief",
     "SimmerResult",
+    "UsageTracker",
     "refine",
 ]

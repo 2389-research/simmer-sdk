@@ -102,6 +102,55 @@ def map_model_id(model: str, brief: SetupBrief) -> str:
     return model
 
 
+def is_anthropic_model(model_id: str) -> bool:
+    """Check if a model ID is an Anthropic/Claude model."""
+    return "anthropic" in model_id or model_id.startswith("claude-")
+
+
+async def invoke_bedrock_model(
+    model_id: str,
+    prompt: str,
+    brief: SetupBrief,
+    max_tokens: int = 16384,
+) -> tuple[str, dict]:
+    """Invoke any Bedrock model via boto3. Returns (text, usage_dict).
+
+    Works with non-Anthropic models (Nova, Llama, Mistral) that the
+    Anthropic SDK can't call. Uses the Bedrock Converse API for
+    consistent request/response format across all models.
+    """
+    import boto3
+    import anyio
+
+    def _sync_call():
+        client = boto3.client(
+            "bedrock-runtime",
+            region_name=brief.aws_region or "us-east-1",
+            aws_access_key_id=brief.aws_access_key,
+            aws_secret_access_key=brief.aws_secret_key,
+        )
+        return client.converse(
+            modelId=model_id,
+            messages=[{"role": "user", "content": [{"text": prompt}]}],
+            inferenceConfig={"maxTokens": max_tokens, "temperature": 0.3},
+        )
+
+    response = await anyio.to_thread.run_sync(_sync_call)
+
+    text = ""
+    for block in response.get("output", {}).get("message", {}).get("content", []):
+        if "text" in block:
+            text += block["text"]
+
+    usage = response.get("usage", {})
+    usage_dict = {
+        "input_tokens": usage.get("inputTokens", 0),
+        "output_tokens": usage.get("outputTokens", 0),
+    }
+
+    return text, usage_dict
+
+
 def get_cli_path() -> str | None:
     """Get the path to the system-installed Claude CLI if available.
 

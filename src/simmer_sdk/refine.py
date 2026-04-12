@@ -300,6 +300,9 @@ async def refine(
     ollama_url: str = "http://localhost:11434",
     judge_preamble: str | None = None,
     custom_tools: dict | None = None,
+    split_generator: bool = False,
+    split_generator_mode: str = "always",
+    executor_model: str | None = None,
     # Optional — callbacks
     on_iteration: OnIterationCallback | None = None,
     on_plateau: OnPlateauCallback | None = None,
@@ -368,11 +371,19 @@ async def refine(
         ollama_url=ollama_url,
         judge_preamble=judge_preamble,
         custom_tools=custom_tools,
+        split_generator=split_generator,
+        split_generator_mode=split_generator_mode,
+        executor_model=executor_model,
     )
 
     brief = resolve_brief(brief)
     original_description = brief.artifact
     problem_class = classify_problem(brief)
+
+    # Usage tracking — attach to brief so all call sites can record
+    from simmer_sdk.usage import UsageTracker
+    usage_tracker = UsageTracker()
+    brief._usage_tracker = usage_tracker  # type: ignore[attr-defined]
 
     out_path = Path(brief.output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -653,7 +664,29 @@ async def refine(
         )
 
         record = reflect_output.record
+
+        # Override reflect's scores with the authoritative judge scores.
+        # The reflect agent (often a small model) writes scores to trajectory.md
+        # and we read them back, but it sometimes misses board consensus scores
+        # or carries forward seed scores. The judge_result.scores are the
+        # definitive source — they come directly from parse_judge_output() or
+        # the board's compute_consensus_scores().
+        if judge_result.scores:
+            record.scores = judge_result.scores
+            record.composite = round(
+                sum(judge_result.scores.values()) / len(judge_result.scores), 1
+            ) if judge_result.scores else 0.0
+
         trajectory.append(record)
+
+        # Rewrite trajectory.md from Python using authoritative scores.
+        # The reflect agent's trajectory table may have wrong scores
+        # (seed scores carried forward, board consensus missed, etc.).
+        # Python's trajectory list has the correct scores from judge_result.
+        write_trajectory_md(
+            trajectory, list(brief.criteria.keys()),
+            find_best(trajectory, brief.primary), brief.primary, out_path,
+        )
 
         if judge_result.deliberation_summary:
             panel_summary = judge_result.deliberation_summary
@@ -718,4 +751,5 @@ async def refine(
         stable_wins=final_stable_wins.working,
         not_working=final_stable_wins.not_working,
         output_dir=out_path,
+        usage=usage_tracker,
     )

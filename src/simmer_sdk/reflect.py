@@ -242,6 +242,8 @@ async def condense_key_change_llm(report: str, brief: SetupBrief | None = None, 
                 ),
             }],
         )
+        if brief and hasattr(brief, "_usage_tracker") and brief._usage_tracker:
+            brief._usage_tracker.record(resolved_model, "clerk", response)
         from simmer_sdk.client import extract_text
         result = extract_text(response).strip().strip('"\'')
         if len(result) <= 60 and result:
@@ -690,6 +692,8 @@ async def dispatch_reflect(
             async for message in client.receive_response():
                 if isinstance(message, ResultMessage):
                     reflect_text = (message.result or "") if hasattr(message, "result") else str(message)
+                    if brief and hasattr(brief, "_usage_tracker") and brief._usage_tracker:
+                        brief._usage_tracker.record_agent(brief.clerk_model, "reflect", message)
 
     # Ensure reflect_text is a string
     if not reflect_text:
