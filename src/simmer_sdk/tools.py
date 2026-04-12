@@ -82,7 +82,7 @@ def tool_edit(file_path: str, old_string: str, new_string: str, replace_all: boo
         return f"ERROR editing {file_path}: {e}"
 
 
-def tool_write(file_path: str, content: str) -> str:
+def tool_write(file_path: str, content: str, cwd: str | None = None) -> str:
     """Write content to a file, creating directories as needed.
 
     For known simmer artifact filenames, normalizes to cwd to prevent
@@ -90,14 +90,14 @@ def tool_write(file_path: str, content: str) -> str:
     """
     try:
         p = Path(file_path)
-        cwd = Path.cwd()
+        base = Path(cwd) if cwd else Path.cwd()
         basename = p.name
 
         known_patterns = ("iteration-", "trajectory.md", "result.md", "seed.md")
         if any(basename.startswith(pat) or basename == pat for pat in known_patterns):
-            p = cwd / basename
+            p = base / basename
         elif not p.is_absolute():
-            p = cwd / p
+            p = base / p
 
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
@@ -211,29 +211,40 @@ def execute_tool(name: str, inputs: dict, cwd: str) -> str:
     if not fn:
         return f"ERROR: Unknown tool '{name}'"
 
+    def _resolve_path(raw: str) -> str:
+        """Resolve a path against cwd if relative."""
+        p = Path(raw)
+        if not p.is_absolute():
+            p = Path(cwd) / p
+        return str(p)
+
     try:
-        # Inject cwd for path-relative tools
         if canonical == "Read":
             path = inputs.get("path", inputs.get("file_path", ""))
-            return fn(file_path=path,
+            return fn(file_path=_resolve_path(path),
                       start_line=inputs.get("start_line", 1),
                       end_line=inputs.get("end_line"))
         elif canonical == "Edit":
-            return fn(file_path=inputs.get("path", inputs.get("file_path", "")),
+            path = inputs.get("path", inputs.get("file_path", ""))
+            return fn(file_path=_resolve_path(path),
                       old_string=inputs.get("old_string", ""),
                       new_string=inputs.get("new_string", ""),
                       replace_all=inputs.get("replace_all", False))
         elif canonical == "Write":
-            return fn(file_path=inputs.get("path", inputs.get("file_path", "")),
-                      content=inputs.get("content", ""))
+            path = inputs.get("path", inputs.get("file_path", ""))
+            return fn(file_path=_resolve_path(path),
+                      content=inputs.get("content", ""),
+                      cwd=cwd)
         elif canonical == "Grep":
+            path = inputs.get("path", cwd)
             return fn(pattern=inputs.get("pattern", ""),
-                      path=inputs.get("path", cwd),
+                      path=_resolve_path(path),
                       context_lines=inputs.get("context_lines", 2),
                       glob_filter=inputs.get("glob_filter", ""))
         elif canonical == "Glob":
+            path = inputs.get("path", inputs.get("cwd", cwd))
             return fn(pattern=inputs.get("pattern", ""),
-                      path=inputs.get("path", inputs.get("cwd", cwd)))
+                      path=_resolve_path(path))
         elif canonical == "Bash":
             return fn(command=inputs.get("command", ""), cwd=cwd)
         else:

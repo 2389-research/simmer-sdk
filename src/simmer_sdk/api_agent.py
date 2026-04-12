@@ -74,10 +74,8 @@ async def run_api_agent(
                 schema_name = schema.get("name", name)
                 custom_fns[schema_name] = fn
 
-    # Set working directory
-    original_cwd = os.getcwd()
-    if cwd:
-        os.chdir(cwd)
+    # Resolve cwd — pass to tools, do NOT os.chdir (process-global, breaks concurrency)
+    resolved_cwd = cwd or os.getcwd()
 
     messages: list[dict] = [{"role": "user", "content": prompt}]
     last_text = ""
@@ -151,13 +149,16 @@ async def run_api_agent(
 
                     # Execute — check custom tools first, then built-in
                     if tool_name in custom_fns:
-                        fn = custom_fns[tool_name]
-                        if inspect.iscoroutinefunction(fn):
-                            result = await fn(**tool_input)
-                        else:
-                            result = fn(**tool_input)
+                        try:
+                            fn = custom_fns[tool_name]
+                            if inspect.iscoroutinefunction(fn):
+                                result = await fn(**tool_input)
+                            else:
+                                result = fn(**tool_input)
+                        except Exception as e:
+                            result = f"ERROR: Custom tool '{tool_name}' failed: {type(e).__name__}: {e}"
                     else:
-                        result = execute_tool(tool_name, tool_input, cwd or ".")
+                        result = execute_tool(tool_name, tool_input, resolved_cwd)
 
                     # Truncate large results
                     result_str = str(result)
@@ -188,8 +189,7 @@ async def run_api_agent(
         return _extract_text(response) if response else ""
 
     finally:
-        if cwd:
-            os.chdir(original_cwd)
+        pass  # No cleanup needed — cwd is passed to tools, not set globally
 
 
 def _extract_text(response) -> str:

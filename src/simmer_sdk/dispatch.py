@@ -21,10 +21,14 @@ def resolve_dispatch(brief: SetupBrief) -> str:
 
     Set ``agent_dispatch="cli"`` explicitly to use the legacy subprocess path.
     """
+    dispatch = getattr(brief, "agent_dispatch", "auto")
+    valid = {"auto", "api", "cli"}
+    if dispatch not in valid:
+        raise ValueError(f"agent_dispatch must be one of {valid}, got {dispatch!r}")
+
     if brief.api_provider == "ollama":
         return "ollama"
 
-    dispatch = getattr(brief, "agent_dispatch", "auto")
     if dispatch == "api":
         return "api"
     if dispatch == "cli":
