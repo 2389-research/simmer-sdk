@@ -153,6 +153,34 @@ evaluator="python eval_scorer.py --spec {candidate_path} --output {output_dir}/e
 evaluator="./run_eval.sh {candidate_path} {output_dir}"
 ```
 
+### Split Generator (Architect/Executor)
+
+Use a strong model for architectural decisions and a cheaper model for bulk generation:
+
+```python
+result = await refine(
+    ...,
+    split_generator=True,
+    split_generator_mode="hybrid",        # "always" or "hybrid"
+    generator_model="claude-sonnet-4-6",  # architect + editor
+    executor_model="claude-haiku-4-5",    # cheap first draft
+)
+```
+
+In `hybrid` mode: iteration 0 uses the cheap executor, iterations 1+ use the strong model for surgical edits. See `docs/hybrid-generator-prompts.md` for full prompt reference.
+
+### Usage Tracking
+
+```python
+result = await refine(...)
+print(result.usage.summary())
+# Run cost breakdown:
+#   generator_architect:  1 calls, ... = $0.016
+#   generator_executor:   1 calls, ... = $0.004
+#   judge:                3 calls, ... = $0.212
+#   Total: 11 calls, ... = $0.350
+```
+
 ### Callbacks
 
 ```python

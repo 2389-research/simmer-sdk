@@ -208,3 +208,4 @@ __marimo__/
 tests/orrery_runs/
 tests/config_comparison/
 tests/executor_comparison/
+tests/hybrid_comparison/

@@ -93,6 +93,7 @@ class SetupBrief:
     judge_preamble: str | None = None  # Optional preamble injected into judge prompts
     custom_tools: dict | None = None  # Custom tools for local agent {"name": {"function": fn, "schema": {...}}}
     split_generator: bool = False  # Use architect/executor split: generator_model plans, executor_model writes
+    split_generator_mode: str = "always"  # "always" = split every iter, "hybrid" = split iter 0, direct edits after
     executor_model: str | None = None  # Model for split generator executor (defaults to clerk_model)
 
 

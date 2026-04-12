@@ -1,17 +1,17 @@
 # Test Artifact
 
-This is a test artifact produced by the simmer refinement loop.
+This is a test artifact produced as the initial candidate in a simmer refinement loop.
 
 ## Purpose
 
-This document serves as a baseline candidate for evaluating the simmer generator and judge pipeline. It is intentionally simple in scope and content.
+This artifact serves as a baseline for iterative improvement. It is intentionally simple, clear, and well-structured so that subsequent refinement rounds have a stable foundation to build upon.
 
-## Content
+## Contents
 
-- Clear structure with a title and sections
-- Readable prose with no ambiguity
-- Self-contained: no external references required to understand it
+- **Section 1**: Placeholder content demonstrating document structure.
+- **Section 2**: A brief description of intent and scope.
+- **Section 3**: Notes for future refinement.
 
 ## Notes
 
-This artifact was generated in iteration 0 as the initial seed candidate. Subsequent iterations will refine it based on judge feedback.
+This candidate was generated in iteration 0. Quality is the primary criterion — future iterations may expand scope, improve clarity, or deepen content based on judge feedback.

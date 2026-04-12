@@ -173,6 +173,58 @@ async def _split_generate(
     )
 
 
+async def _direct_edit(
+    brief: SetupBrief,
+    iteration: int,
+    current_candidate: str,
+    asi: str,
+    original_description: str | None = None,
+    regression_note: str | None = None,
+) -> GeneratorOutput:
+    """Direct edit: the strong model (generator_model) surgically improves the artifact.
+
+    Used in hybrid mode for iterations 1+ after the cheap executor produced
+    the first draft. The strong model reads the full artifact and the ASI,
+    then makes targeted changes — not a full rewrite.
+    """
+    from simmer_sdk.client import create_async_client, map_model_id, extract_text
+
+    client = create_async_client(brief)
+
+    prompt = (
+        f"You are improving an artifact based on judge feedback (iteration {iteration}).\n\n"
+        f"CURRENT ARTIFACT:\n{current_candidate}\n\n"
+        f"JUDGE FEEDBACK (ASI — single most impactful improvement):\n{asi}\n\n"
+    )
+    if original_description:
+        prompt += f"ORIGINAL DESCRIPTION:\n{original_description}\n\n"
+    if regression_note:
+        prompt += f"REGRESSION NOTE:\n{regression_note}\n\n"
+
+    prompt += (
+        "Make SURGICAL changes to address the ASI feedback. Do not rewrite from scratch. "
+        "Preserve everything that works. Add, modify, or restructure only what the ASI "
+        "identifies as the highest-leverage improvement.\n\n"
+        "Output the COMPLETE improved artifact — not a diff, not commentary."
+    )
+
+    model = map_model_id(brief.generator_model, brief)
+    response = await client.messages.create(
+        model=model,
+        max_tokens=16384,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    candidate = extract_text(response)
+
+    if hasattr(brief, "_usage_tracker") and brief._usage_tracker:
+        brief._usage_tracker.record(model, "generator_edit", response)
+
+    return GeneratorOutput(
+        candidate=candidate,
+        report=f"[direct-edit] Applied ASI: {asi[:200]}",
+    )
+
+
 async def dispatch_generator(
     brief: SetupBrief,
     iteration: int,
@@ -184,16 +236,28 @@ async def dispatch_generator(
     regression_note: str | None = None,
 ) -> GeneratorOutput:
     """Dispatch the generator subagent via the Claude Agent SDK."""
-    # Split generator: architect plans, executor writes
+    # Split generator modes
     if brief.split_generator and brief.artifact_type != "workspace":
-        return await _split_generate(
-            brief=brief,
-            iteration=iteration,
-            current_candidate=current_candidate,
-            asi=asi,
-            original_description=original_description,
-            regression_note=regression_note,
-        )
+        if brief.split_generator_mode == "hybrid" and iteration > 0:
+            # Hybrid: iteration 0 uses cheap executor, iterations 1+ use Sonnet direct edits
+            return await _direct_edit(
+                brief=brief,
+                iteration=iteration,
+                current_candidate=current_candidate,
+                asi=asi,
+                original_description=original_description,
+                regression_note=regression_note,
+            )
+        else:
+            # Always split (default) or iteration 0 of hybrid
+            return await _split_generate(
+                brief=brief,
+                iteration=iteration,
+                current_candidate=current_candidate,
+                asi=asi,
+                original_description=original_description,
+                regression_note=regression_note,
+            )
 
     is_workspace = brief.artifact_type == "workspace"
 
