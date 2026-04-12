@@ -74,11 +74,14 @@ async def run_api_agent(
                 schema_name = schema.get("name", name)
                 custom_fns[schema_name] = fn
 
+    if max_turns <= 0:
+        raise ValueError(f"max_turns must be > 0, got {max_turns}")
+
     # Resolve cwd — pass to tools, do NOT os.chdir (process-global, breaks concurrency)
     resolved_cwd = cwd or os.getcwd()
 
     messages: list[dict] = [{"role": "user", "content": prompt}]
-    last_text = ""
+    text_parts: list[str] = []  # accumulate all text blocks across turns
 
     # Track duplicate tool calls for loop-breaking
     last_tool_call: Optional[tuple[str, str]] = None
@@ -107,14 +110,14 @@ async def run_api_agent(
             if usage_tracker and hasattr(response, "usage") and response.usage:
                 usage_tracker.record(model, usage_role, response)
 
-            # Collect text from this response
+            # Collect text from this response (accumulate, don't overwrite)
             for block in response.content:
-                if hasattr(block, "text"):
-                    last_text = block.text
+                if hasattr(block, "text") and block.text:
+                    text_parts.append(block.text)
 
             # Done — model produced final text
             if response.stop_reason == "end_turn":
-                logger.debug("API agent done at turn %d, %d chars", turn + 1, len(last_text))
+                logger.debug("API agent done at turn %d, %d chars", turn + 1, len("\n".join(text_parts)))
                 return _extract_text(response)
 
             # Model wants to use tools
@@ -184,8 +187,8 @@ async def run_api_agent(
 
         # Max turns reached
         logger.warning("API agent hit max_turns=%d — returning best effort", max_turns)
-        if last_text:
-            return last_text
+        if "\n".join(text_parts):
+            return "\n".join(text_parts)
         return _extract_text(response) if response else ""
 
     finally:
