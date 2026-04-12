@@ -658,8 +658,10 @@ async def dispatch_reflect(
         search_space=search_space,
     )
 
-    # Local mode: use Ollama agent loop instead of Claude CLI
-    if brief and brief.api_provider == "ollama":
+    from simmer_sdk.dispatch import resolve_dispatch
+    dispatch = resolve_dispatch(brief) if brief else "cli"
+
+    if dispatch == "ollama":
         from simmer_sdk.local_agent import run_local_agent
         reflect_text = await run_local_agent(
             prompt=prompt,
@@ -669,9 +671,25 @@ async def dispatch_reflect(
             custom_tools=brief.custom_tools if brief else None,
             cwd=str(output_dir),
             max_turns=5,
+            usage_tracker=getattr(brief, "_usage_tracker", None) if brief else None,
+            usage_role="reflect",
+        )
+    elif dispatch == "api":
+        from simmer_sdk.api_agent import run_api_agent
+        from simmer_sdk.client import create_async_client, map_model_id
+        reflect_text = await run_api_agent(
+            prompt=prompt,
+            client=create_async_client(brief),
+            model=map_model_id(model, brief) if brief else model,
+            tools=["Read", "Write", "Glob"],
+            custom_tools=brief.custom_tools if brief else None,
+            cwd=str(output_dir),
+            max_turns=5,
+            usage_tracker=getattr(brief, "_usage_tracker", None) if brief else None,
+            usage_role="reflect",
         )
     else:
-        # Dispatch as Agent SDK subagent with Read + Write + Glob
+        # CLI dispatch (legacy)
         from simmer_sdk.client import map_model_id, get_agent_env, get_cli_path
         agent_env = get_agent_env(brief) if brief else {}
         resolved_model = map_model_id(model, brief) if brief else model
