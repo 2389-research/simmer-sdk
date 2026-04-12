@@ -120,20 +120,22 @@ async def invoke_bedrock_model(
     consistent request/response format across all models.
     """
     import boto3
-    import json
+    import anyio
 
-    client = boto3.client(
-        "bedrock-runtime",
-        region_name=brief.aws_region or "us-east-1",
-        aws_access_key_id=brief.aws_access_key,
-        aws_secret_access_key=brief.aws_secret_key,
-    )
+    def _sync_call():
+        client = boto3.client(
+            "bedrock-runtime",
+            region_name=brief.aws_region or "us-east-1",
+            aws_access_key_id=brief.aws_access_key,
+            aws_secret_access_key=brief.aws_secret_key,
+        )
+        return client.converse(
+            modelId=model_id,
+            messages=[{"role": "user", "content": [{"text": prompt}]}],
+            inferenceConfig={"maxTokens": max_tokens, "temperature": 0.3},
+        )
 
-    response = client.converse(
-        modelId=model_id,
-        messages=[{"role": "user", "content": [{"text": prompt}]}],
-        inferenceConfig={"maxTokens": max_tokens, "temperature": 0.3},
-    )
+    response = await anyio.to_thread.run_sync(_sync_call)
 
     text = ""
     for block in response.get("output", {}).get("message", {}).get("content", []):

@@ -164,8 +164,9 @@ async def _split_generate(
         try:
             with open(contract_path, "w") as f:
                 f.write(contract)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Failed to save contract: {e}")
 
     return GeneratorOutput(
         candidate=candidate,
