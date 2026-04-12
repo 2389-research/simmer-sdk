@@ -91,8 +91,7 @@ class SetupBrief:
     aws_region: str | None = None
     ollama_url: str = "http://localhost:11434"
     judge_preamble: str | None = None  # Optional preamble injected into judge prompts
-    custom_tools: dict | None = None  # Custom tools for agent {"name": {"function": fn, "schema": {...}}}
-    agent_dispatch: str = "auto"  # "auto" | "api" | "cli" — how to dispatch agent subprocesses
+    custom_tools: dict | None = None  # Custom tools for local agent {"name": {"function": fn, "schema": {...}}}
     split_generator: bool = False  # Use architect/executor split: generator_model plans, executor_model writes
     split_generator_mode: str = "always"  # "always" = split every iter, "hybrid" = split iter 0, direct edits after
     executor_model: str | None = None  # Model for split generator executor (defaults to clerk_model)

@@ -230,12 +230,9 @@ async def _dispatch_single_panelist(
 
     is_workspace = brief.artifact_type == "workspace"
     workspace_path: Optional[str] = brief.artifact if is_workspace else None
-    agent_cwd = workspace_path if is_workspace else brief.output_dir
 
-    from simmer_sdk.dispatch import resolve_dispatch
-    dispatch = resolve_dispatch(brief)
-
-    if dispatch == "ollama":
+    # Local mode: use Ollama agent loop instead of Claude CLI
+    if brief.api_provider == "ollama":
         from simmer_sdk.local_agent import run_local_agent
         result_text = await run_local_agent(
             prompt=prompt,
@@ -243,44 +240,33 @@ async def _dispatch_single_panelist(
             ollama_url=brief.ollama_url,
             tools=["Read", "Grep", "Glob"],
             custom_tools=brief.custom_tools,
-            cwd=agent_cwd,
+            cwd=workspace_path if is_workspace else brief.output_dir,
             max_turns=25,
-            usage_tracker=getattr(brief, "_usage_tracker", None) if brief else None,
-            usage_role="judge",
         )
-    elif dispatch == "api":
-        from simmer_sdk.api_agent import run_api_agent
-        from simmer_sdk.client import create_async_client, map_model_id
-        result_text = await run_api_agent(
-            prompt=prompt,
-            client=create_async_client(brief),
-            model=map_model_id(brief.judge_model, brief),
-            tools=["Read", "Grep", "Glob"],
-            custom_tools=brief.custom_tools,
-            cwd=agent_cwd,
-            max_turns=25,
-            usage_tracker=getattr(brief, "_usage_tracker", None) if brief else None,
-            usage_role="judge",
-        )
-    else:
-        from simmer_sdk.client import map_model_id, get_agent_env, get_cli_path
-        options = ClaudeAgentOptions(
-            tools=["Read", "Grep", "Glob"],
-            model=map_model_id(brief.judge_model, brief),
-            permission_mode="bypassPermissions",
-            cwd=agent_cwd,
-            max_turns=25,
-            env=get_agent_env(brief),
-            cli_path=get_cli_path(),
-        )
-        result_text = ""
-        async with ClaudeSDKClient(options=options) as client:
-            await client.query(prompt)
-            async for message in client.receive_response():
-                if isinstance(message, ResultMessage):
-                    result_text = message.result if hasattr(message, "result") else str(message)
-                    if hasattr(brief, "_usage_tracker") and brief._usage_tracker:
-                        brief._usage_tracker.record_agent(brief.judge_model, "judge", message)
+        parsed = parse_judge_output(result_text, brief.criteria)
+        return judge_def.name, result_text, parsed
+
+    from simmer_sdk.client import map_model_id, get_agent_env, get_cli_path
+    max_turns = 25
+
+    options = ClaudeAgentOptions(
+        tools=["Read", "Grep", "Glob"],
+        model=map_model_id(brief.judge_model, brief),
+        permission_mode="bypassPermissions",
+        cwd=workspace_path if is_workspace else brief.output_dir,
+        max_turns=max_turns,
+        env=get_agent_env(brief),
+        cli_path=get_cli_path(),
+    )
+
+    result_text = ""
+    async with ClaudeSDKClient(options=options) as client:
+        await client.query(prompt)
+        async for message in client.receive_response():
+            if isinstance(message, ResultMessage):
+                result_text = message.result if hasattr(message, "result") else str(message)
+                if hasattr(brief, "_usage_tracker") and brief._usage_tracker:
+                    brief._usage_tracker.record_agent(brief.judge_model, "judge", message)
 
     parsed = parse_judge_output(result_text, brief.criteria)
     return judge_def.name, result_text, parsed
