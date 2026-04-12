@@ -193,6 +193,8 @@ async def dispatch_judge(
             custom_tools=brief.custom_tools,
             cwd=agent_cwd,
             max_turns=25,
+            usage_tracker=getattr(brief, "_usage_tracker", None) if brief else None,
+            usage_role="judge",
         )
     elif dispatch == "api":
         from simmer_sdk.api_agent import run_api_agent
@@ -205,6 +207,8 @@ async def dispatch_judge(
             custom_tools=brief.custom_tools,
             cwd=agent_cwd,
             max_turns=25,
+            usage_tracker=getattr(brief, "_usage_tracker", None) if brief else None,
+            usage_role="judge",
         )
     else:
         # CLI dispatch (legacy)

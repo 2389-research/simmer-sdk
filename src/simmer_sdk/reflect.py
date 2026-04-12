@@ -671,6 +671,8 @@ async def dispatch_reflect(
             custom_tools=brief.custom_tools if brief else None,
             cwd=str(output_dir),
             max_turns=5,
+            usage_tracker=getattr(brief, "_usage_tracker", None) if brief else None,
+            usage_role="reflect",
         )
     elif dispatch == "api":
         from simmer_sdk.api_agent import run_api_agent
@@ -683,6 +685,8 @@ async def dispatch_reflect(
             custom_tools=brief.custom_tools if brief else None,
             cwd=str(output_dir),
             max_turns=5,
+            usage_tracker=getattr(brief, "_usage_tracker", None) if brief else None,
+            usage_role="reflect",
         )
     else:
         # CLI dispatch (legacy)

@@ -39,6 +39,8 @@ async def run_api_agent(
     system_prompt: Optional[str] = None,
     max_turns: int = 25,
     max_tokens: int = 8192,
+    usage_tracker: Optional[Any] = None,  # UsageTracker instance
+    usage_role: str = "agent",  # Role label for usage tracking
 ) -> str:
     """Run an agent loop using the Anthropic Messages API with tool_use.
 
@@ -102,6 +104,10 @@ async def run_api_agent(
 
             logger.debug("API agent turn %d/%d: sending %d messages", turn + 1, max_turns, len(messages))
             response = await client.messages.create(**kwargs)
+
+            # Track usage per turn
+            if usage_tracker and hasattr(response, "usage") and response.usage:
+                usage_tracker.record(model, usage_role, response)
 
             # Collect text from this response
             for block in response.content:

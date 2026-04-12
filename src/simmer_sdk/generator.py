@@ -303,6 +303,8 @@ async def dispatch_generator(
             custom_tools=brief.custom_tools,
             cwd=agent_cwd,
             max_turns=20,
+            usage_tracker=getattr(brief, "_usage_tracker", None) if brief else None,
+            usage_role="generator",
         )
     elif dispatch == "api":
         from simmer_sdk.api_agent import run_api_agent
@@ -315,6 +317,8 @@ async def dispatch_generator(
             custom_tools=brief.custom_tools,
             cwd=agent_cwd,
             max_turns=20,
+            usage_tracker=getattr(brief, "_usage_tracker", None) if brief else None,
+            usage_role="generator",
         )
     else:
         # CLI dispatch (legacy)
