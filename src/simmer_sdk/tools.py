@@ -54,6 +54,8 @@ def tool_edit(file_path: str, old_string: str, new_string: str, replace_all: boo
         p = Path(file_path)
         if not p.exists():
             return f"ERROR: File not found: {file_path}"
+        if not old_string:
+            return "ERROR: old_string must not be empty."
 
         content = p.read_text(encoding="utf-8", errors="replace")
         count = content.count(old_string)
