@@ -258,6 +258,8 @@ async def run_local_agent(
     custom_tools: Optional[dict[str, dict]] = None,
     cwd: Optional[str] = None,
     max_turns: int = 20,
+    usage_tracker: Optional[Any] = None,
+    usage_role: str = "agent",
 ) -> str:
     """Run a local agent loop with tool calling via Ollama.
 
@@ -335,6 +337,18 @@ async def run_local_agent(
 
             logger.debug(f"Turn {turn}/{max_turns}: sending {len(messages)} messages")
             response = await client.chat.completions.create(**kwargs)
+
+            # Track usage per turn (Ollama returns usage like OpenAI)
+            if usage_tracker and hasattr(response, "usage") and response.usage:
+                try:
+                    usage_tracker.record_tokens(
+                        model, usage_role,
+                        getattr(response.usage, "prompt_tokens", 0) or 0,
+                        getattr(response.usage, "completion_tokens", 0) or 0,
+                    )
+                except Exception:
+                    pass
+
             choice = response.choices[0]
             message = choice.message
 
