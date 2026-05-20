@@ -272,8 +272,9 @@ async def test_request_omits_thinking_config_when_level_none(patch_httpx):
 
 @pytest.mark.asyncio
 async def test_create_raises_on_tools_kwarg(patch_httpx):
-    """Tool-use isn't translated to Gemini's functionCall — must fail loudly."""
-    patch_httpx([_ok_response()])
+    """Tool-use isn't translated to Gemini's functionCall — must fail loudly
+    BEFORE any HTTP call goes out."""
+    fake = patch_httpx([_ok_response()])
     client = GeminiClient(api_key="k")
 
     with pytest.raises(NotImplementedError, match="tools"):
@@ -283,11 +284,13 @@ async def test_create_raises_on_tools_kwarg(patch_httpx):
             messages=[{"role": "user", "content": "hi"}],
             tools=[{"name": "Read", "description": "..."}],
         )
+    # Fail-fast guarantee: no network call should happen when raising.
+    assert fake.calls == []
 
 
 @pytest.mark.asyncio
 async def test_create_raises_on_tool_choice_kwarg(patch_httpx):
-    patch_httpx([_ok_response()])
+    fake = patch_httpx([_ok_response()])
     client = GeminiClient(api_key="k")
 
     with pytest.raises(NotImplementedError, match="tool_choice"):
@@ -297,6 +300,7 @@ async def test_create_raises_on_tool_choice_kwarg(patch_httpx):
             messages=[{"role": "user", "content": "hi"}],
             tool_choice="auto",
         )
+    assert fake.calls == []
 
 
 @pytest.mark.asyncio
