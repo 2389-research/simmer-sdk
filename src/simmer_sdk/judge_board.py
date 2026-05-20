@@ -120,7 +120,7 @@ async def compose_judges(
     )
 
     from simmer_sdk.client import create_async_client, map_model_id
-    client = create_async_client(brief)
+    client = create_async_client(brief, role="clerk")
     resolved_model = map_model_id(brief.clerk_model, brief)
     response = await client.messages.create(
         model=resolved_model,
@@ -253,7 +253,7 @@ async def _dispatch_single_panelist(
         from simmer_sdk.client import create_async_client, map_model_id
         result_text = await run_api_agent(
             prompt=prompt,
-            client=create_async_client(brief),
+            client=create_async_client(brief, role="judge"),
             model=map_model_id(brief.judge_model, brief),
             tools=["Read", "Grep", "Glob"],
             custom_tools=brief.custom_tools,
@@ -307,7 +307,7 @@ async def _deliberate_single(
     )
 
     if brief:
-        client = create_async_client(brief)
+        client = create_async_client(brief, role="judge")
         resolved_model = map_model_id(model, brief)
     else:
         import anthropic as _anthropic
@@ -571,7 +571,7 @@ async def dispatch_board(
     # Use judge model for synthesis — haiku loses structural nuance when
     # distilling board deliberation into a single ASI.
     from simmer_sdk.client import create_async_client, map_model_id
-    client = create_async_client(brief)
+    client = create_async_client(brief, role="judge")
     resolved_synth_model = map_model_id(brief.judge_model, brief)
     response = await client.messages.create(
         model=resolved_synth_model,

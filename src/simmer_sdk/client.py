@@ -1,17 +1,21 @@
 # ABOUTME: API client factory for Anthropic, AWS Bedrock, and Ollama providers.
 # ABOUTME: Handles model ID mapping, CLI path resolution, and agent environment setup.
 
-"""Client factory for Anthropic API, AWS Bedrock, and Ollama.
+"""Client factory for Anthropic API, AWS Bedrock, Ollama, and Google Gemini.
 
 When api_provider="bedrock", creates AsyncAnthropicBedrock clients and maps
 model IDs to Bedrock format. When api_provider="ollama", creates AsyncAnthropic
 clients pointed at Ollama's Anthropic-compatible /v1/messages endpoint.
+When api_provider="google", returns a GeminiClient adapter that exposes
+Anthropic's messages.create() shape over Google's generateContent endpoint
+(tool_use is NOT supported — see _gemini_adapter.py).
 When api_provider="anthropic" (default), uses AsyncAnthropic with
 ANTHROPIC_API_KEY from environment.
 
 For ClaudeSDKClient (Agent SDK) calls, provider config is passed via env vars
 through ClaudeAgentOptions(env={...}). Bedrock uses CLAUDE_CODE_USE_BEDROCK=1,
-Ollama uses ANTHROPIC_BASE_URL pointed at the Ollama server.
+Ollama uses ANTHROPIC_BASE_URL pointed at the Ollama server. Google has no
+Agent SDK path — the Claude CLI can't drive Gemini.
 """
 
 from __future__ import annotations
@@ -64,12 +68,23 @@ def extract_text(response) -> str:
     return ""
 
 
-def create_async_client(brief: SetupBrief):
+def _resolve_gemini_thinking_level(brief: SetupBrief, role: str) -> str | None:
+    """Pick the Gemini thinking level for a given role with fallback to global."""
+    role_field = {
+        "judge": brief.gemini_judge_thinking_level,
+        "generator": brief.gemini_generator_thinking_level,
+        "clerk": brief.gemini_clerk_thinking_level,
+    }.get(role)
+    return role_field or brief.gemini_thinking_level
+
+
+def create_async_client(brief: SetupBrief, role: str = "default"):
     """Create an async Anthropic client based on the API provider config.
 
     Returns AsyncAnthropic for direct API and Ollama, AsyncAnthropicBedrock
-    for Bedrock. Ollama uses the Anthropic SDK pointed at Ollama's
-    /v1/messages endpoint.
+    for Bedrock, GeminiClient for Google. ``role`` is only used for Google
+    to pick the right per-role thinking level (judge/generator/clerk).
+    Ollama uses the Anthropic SDK pointed at Ollama's /v1/messages endpoint.
     """
     if brief.api_provider == "bedrock":
         from anthropic import AsyncAnthropicBedrock
@@ -84,6 +99,19 @@ def create_async_client(brief: SetupBrief):
         return AsyncAnthropic(
             base_url=brief.ollama_url,
             api_key="ollama",  # Ollama doesn't need a real key
+        )
+    elif brief.api_provider == "google":
+        import os
+        from simmer_sdk._gemini_adapter import GeminiClient
+        api_key = brief.google_api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "api_provider='google' requires GEMINI_API_KEY (or GOOGLE_API_KEY) "
+                "in the environment or brief.google_api_key set."
+            )
+        return GeminiClient(
+            api_key=api_key,
+            thinking_level=_resolve_gemini_thinking_level(brief, role),
         )
     else:
         from anthropic import AsyncAnthropic

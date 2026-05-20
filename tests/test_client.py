@@ -1,5 +1,5 @@
 # ABOUTME: Tests for client.py — model mapping, env vars, client creation, retry config.
-# ABOUTME: Covers Anthropic, Bedrock, and Ollama provider paths without making real API calls.
+# ABOUTME: Covers Anthropic, Bedrock, Ollama, and Google provider paths without making real API calls.
 
 """Tests for client.py — provider routing, model mapping, env vars."""
 
@@ -8,6 +8,7 @@ import pytest
 from simmer_sdk.client import (
     BEDROCK_MODEL_MAP,
     OLLAMA_MODELS,
+    _resolve_gemini_thinking_level,
     create_async_client,
     extract_text,
     get_agent_env,
@@ -241,3 +242,100 @@ def test_extract_text_thinking_only_fallback():
 def test_extract_text_empty_response():
     resp = _FakeResponse([])
     assert extract_text(resp) == ""
+
+
+# ---------------------------------------------------------------------------
+# Google / Gemini provider
+# ---------------------------------------------------------------------------
+
+
+def test_create_client_google_returns_gemini_client(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    from simmer_sdk._gemini_adapter import GeminiClient
+    client = create_async_client(_brief(api_provider="google"))
+    assert isinstance(client, GeminiClient)
+
+
+def test_create_client_google_uses_brief_api_key_over_env(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    brief = _brief(api_provider="google", google_api_key="explicit-key")
+    client = create_async_client(brief)
+    assert client._api_key == "explicit-key"
+
+
+def test_create_client_google_falls_back_to_google_api_key_env(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_API_KEY", "from-google-env")
+    client = create_async_client(_brief(api_provider="google"))
+    assert client._api_key == "from-google-env"
+
+
+def test_create_client_google_raises_without_any_key(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
+        create_async_client(_brief(api_provider="google"))
+
+
+def test_create_client_google_passes_role_thinking_level(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    brief = _brief(
+        api_provider="google",
+        gemini_thinking_level="MINIMAL",
+        gemini_judge_thinking_level="HIGH",
+    )
+    judge_client = create_async_client(brief, role="judge")
+    other_client = create_async_client(brief, role="generator")
+    assert judge_client._thinking_level == "HIGH"
+    assert other_client._thinking_level == "MINIMAL"
+
+
+def test_create_client_google_lowercase_thinking_level_normalized(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    brief = _brief(api_provider="google", gemini_thinking_level="low")
+    client = create_async_client(brief)
+    assert client._thinking_level == "LOW"
+
+
+# ---------------------------------------------------------------------------
+# _resolve_gemini_thinking_level — per-role lookup with global fallback
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_thinking_level_per_role_override():
+    brief = _brief(
+        gemini_thinking_level="MINIMAL",
+        gemini_judge_thinking_level="HIGH",
+        gemini_generator_thinking_level="LOW",
+    )
+    assert _resolve_gemini_thinking_level(brief, "judge") == "HIGH"
+    assert _resolve_gemini_thinking_level(brief, "generator") == "LOW"
+    assert _resolve_gemini_thinking_level(brief, "clerk") == "MINIMAL"
+
+
+def test_resolve_thinking_level_falls_back_to_global():
+    brief = _brief(gemini_thinking_level="MEDIUM")
+    assert _resolve_gemini_thinking_level(brief, "judge") == "MEDIUM"
+    assert _resolve_gemini_thinking_level(brief, "generator") == "MEDIUM"
+    assert _resolve_gemini_thinking_level(brief, "clerk") == "MEDIUM"
+
+
+def test_resolve_thinking_level_none_when_nothing_set():
+    brief = _brief()
+    assert _resolve_gemini_thinking_level(brief, "judge") is None
+
+
+def test_resolve_thinking_level_unknown_role_falls_back_to_global():
+    brief = _brief(gemini_thinking_level="LOW")
+    assert _resolve_gemini_thinking_level(brief, "unknown_role") == "LOW"
+
+
+# ---------------------------------------------------------------------------
+# get_agent_env — Google has no Agent SDK path
+# ---------------------------------------------------------------------------
+
+
+def test_get_agent_env_google_returns_empty():
+    """Claude CLI can't drive Gemini — no env vars to wire up."""
+    assert get_agent_env(_brief(api_provider="google")) == {}

@@ -250,6 +250,75 @@ class TestRefineInputValidation:
         except Exception:
             pass  # API errors or other errors are fine here
 
+    async def test_accepts_google_provider(self, monkeypatch):
+        """api_provider='google' must pass validation. Downstream API failure
+        with the test key is expected — we only care the validator didn't trip."""
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        try:
+            await refine(
+                artifact="x",
+                criteria={"quality": "good"},
+                iterations=0,
+                api_provider="google",
+            )
+        except ValueError as exc:
+            assert "api_provider" not in str(exc), "google should pass api_provider validation"
+        except (NameError, AttributeError, TypeError, SyntaxError, AssertionError):
+            # These would be real bugs, not expected downstream API failures.
+            raise
+        except Exception:
+            pass  # remote auth / network failure on test key — expected
+
+    async def test_rejects_invalid_gemini_thinking_level(self):
+        with pytest.raises(ValueError, match="gemini_thinking_level"):
+            await refine(
+                artifact="x",
+                criteria={"quality": "good"},
+                gemini_thinking_level="EXTREME",
+            )
+
+    async def test_rejects_invalid_judge_thinking_level(self):
+        with pytest.raises(ValueError, match="gemini_judge_thinking_level"):
+            await refine(
+                artifact="x",
+                criteria={"quality": "good"},
+                gemini_judge_thinking_level="bogus",
+            )
+
+    async def test_rejects_invalid_generator_thinking_level(self):
+        with pytest.raises(ValueError, match="gemini_generator_thinking_level"):
+            await refine(
+                artifact="x",
+                criteria={"quality": "good"},
+                gemini_generator_thinking_level="bogus",
+            )
+
+    async def test_rejects_invalid_clerk_thinking_level(self):
+        with pytest.raises(ValueError, match="gemini_clerk_thinking_level"):
+            await refine(
+                artifact="x",
+                criteria={"quality": "good"},
+                gemini_clerk_thinking_level="bogus",
+            )
+
+    async def test_gemini_thinking_level_case_insensitive(self, monkeypatch):
+        """lowercase 'medium' should validate the same as 'MEDIUM'."""
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        try:
+            await refine(
+                artifact="x",
+                criteria={"quality": "good"},
+                iterations=0,
+                api_provider="google",
+                gemini_thinking_level="medium",
+            )
+        except ValueError as exc:
+            assert "gemini_thinking_level" not in str(exc)
+        except (NameError, AttributeError, TypeError, SyntaxError, AssertionError):
+            raise
+        except Exception:
+            pass  # expected downstream failure with test key
+
 
 # ---------------------------------------------------------------------------
 # _call_callback

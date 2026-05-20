@@ -85,11 +85,17 @@ class SetupBrief:
     clerk_model: str = "claude-haiku-4-5"
 
     # API provider configuration
-    api_provider: str = "anthropic"  # "anthropic" | "bedrock" | "ollama"
+    api_provider: str = "anthropic"  # "anthropic" | "bedrock" | "ollama" | "google"
     aws_access_key: str | None = None
     aws_secret_key: str | None = None
     aws_region: str | None = None
     ollama_url: str = "http://localhost:11434"
+    google_api_key: str | None = None  # Falls back to $GEMINI_API_KEY if unset
+    gemini_thinking_level: str | None = None  # "MINIMAL" | "LOW" | "MEDIUM" | "HIGH" | None=default
+    # Per-role overrides — each falls back to gemini_thinking_level if unset
+    gemini_judge_thinking_level: str | None = None
+    gemini_generator_thinking_level: str | None = None
+    gemini_clerk_thinking_level: str | None = None
     judge_preamble: str | None = None  # Optional preamble injected into judge prompts
     custom_tools: dict | None = None  # Custom tools for agent {"name": {"function": fn, "schema": {...}}}
     agent_dispatch: str = "auto"  # "auto" | "api" | "cli" — how to dispatch agent subprocesses

@@ -201,7 +201,7 @@ async def dispatch_judge(
         from simmer_sdk.client import create_async_client, map_model_id
         result_text = await run_api_agent(
             prompt=prompt,
-            client=create_async_client(brief),
+            client=create_async_client(brief, role="judge"),
             model=map_model_id(brief.judge_model, brief),
             tools=["Read", "Grep", "Glob"],
             custom_tools=brief.custom_tools,
