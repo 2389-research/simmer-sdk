@@ -78,7 +78,7 @@ async def _split_generate(
     """
     from simmer_sdk.client import create_async_client, map_model_id, extract_text
 
-    client = create_async_client(brief)
+    client = create_async_client(brief, role="generator")
 
     # Step 1: Architect writes the contract
     architect_prompt = (
@@ -129,9 +129,14 @@ async def _split_generate(
     exec_model_name = brief.executor_model or brief.clerk_model
     exec_model_id = map_model_id(exec_model_name, brief)
 
-    # Route: Anthropic SDK for Claude models, Bedrock Converse API for everything else
+    # Route: Bedrock Converse API only for non-Claude Bedrock models (Nova, Llama, Mistral).
+    # Everything else — including Gemini and Ollama — uses the active client's
+    # messages.create() which already speaks the right protocol via the adapter.
     from simmer_sdk.client import is_anthropic_model
-    if is_anthropic_model(exec_model_id):
+    use_bedrock_converse = (
+        brief.api_provider == "bedrock" and not is_anthropic_model(exec_model_id)
+    )
+    if not use_bedrock_converse:
         executor_response = await client.messages.create(
             model=exec_model_id,
             max_tokens=16384,
@@ -190,7 +195,7 @@ async def _direct_edit(
     """
     from simmer_sdk.client import create_async_client, map_model_id, extract_text
 
-    client = create_async_client(brief)
+    client = create_async_client(brief, role="generator")
 
     prompt = (
         f"You are improving an artifact based on judge feedback (iteration {iteration}).\n\n"
@@ -311,7 +316,7 @@ async def dispatch_generator(
         from simmer_sdk.client import create_async_client, map_model_id
         result_text = await run_api_agent(
             prompt=prompt,
-            client=create_async_client(brief),
+            client=create_async_client(brief, role="generator"),
             model=map_model_id(brief.generator_model, brief),
             tools=tools,
             custom_tools=brief.custom_tools,

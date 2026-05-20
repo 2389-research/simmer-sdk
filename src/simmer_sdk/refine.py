@@ -298,6 +298,11 @@ async def refine(
     aws_secret_key: str | None = None,
     aws_region: str | None = None,
     ollama_url: str = "http://localhost:11434",
+    google_api_key: str | None = None,
+    gemini_thinking_level: str | None = None,
+    gemini_judge_thinking_level: str | None = None,
+    gemini_generator_thinking_level: str | None = None,
+    gemini_clerk_thinking_level: str | None = None,
     judge_preamble: str | None = None,
     custom_tools: dict | None = None,
     agent_dispatch: str = "auto",
@@ -326,9 +331,18 @@ async def refine(
     valid_judge_modes = {"auto", "single", "board"}
     if judge_mode not in valid_judge_modes:
         raise ValueError(f"judge_mode must be one of {valid_judge_modes}, got {judge_mode!r}")
-    valid_providers = {"anthropic", "bedrock", "ollama"}
+    valid_providers = {"anthropic", "bedrock", "ollama", "google"}
     if api_provider not in valid_providers:
         raise ValueError(f"api_provider must be one of {valid_providers}, got {api_provider!r}")
+    valid_levels = {"MINIMAL", "LOW", "MEDIUM", "HIGH"}
+    for _name, _val in (
+        ("gemini_thinking_level", gemini_thinking_level),
+        ("gemini_judge_thinking_level", gemini_judge_thinking_level),
+        ("gemini_generator_thinking_level", gemini_generator_thinking_level),
+        ("gemini_clerk_thinking_level", gemini_clerk_thinking_level),
+    ):
+        if _val is not None and _val.upper() not in valid_levels:
+            raise ValueError(f"{_name} must be one of {valid_levels}, got {_val!r}")
     if judge_count < 2:
         raise ValueError("judge_count must be >= 2")
 
@@ -370,6 +384,11 @@ async def refine(
         aws_secret_key=aws_secret_key,
         aws_region=aws_region,
         ollama_url=ollama_url,
+        google_api_key=google_api_key,
+        gemini_thinking_level=gemini_thinking_level,
+        gemini_judge_thinking_level=gemini_judge_thinking_level,
+        gemini_generator_thinking_level=gemini_generator_thinking_level,
+        gemini_clerk_thinking_level=gemini_clerk_thinking_level,
         judge_preamble=judge_preamble,
         custom_tools=custom_tools,
         agent_dispatch=agent_dispatch,

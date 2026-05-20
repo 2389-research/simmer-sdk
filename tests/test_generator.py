@@ -1,7 +1,9 @@
-# ABOUTME: Tests for generator.py — specifically _parse_generator_output parser logic.
+# ABOUTME: Tests for generator.py — _parse_generator_output and split-generator routing.
 # ABOUTME: Verifies candidate, report, and files_modified extraction from subagent result text.
 
-from simmer_sdk.generator import GeneratorOutput, _parse_generator_output
+import pytest
+
+from simmer_sdk.generator import GeneratorOutput, _parse_generator_output, _split_generate
 from simmer_sdk.types import SetupBrief
 
 
@@ -101,3 +103,141 @@ class TestParseGeneratorOutput:
         long_summary = "Summary: " + "x" * 1000 + "\n\nEnd."
         result = _parse_generator_output(long_summary, brief)
         assert len(result.report) <= 500
+
+
+# ---------------------------------------------------------------------------
+# _split_generate routing — regression for Bedrock-Converse fallback gate.
+# Prior bug: any model id not matching is_anthropic_model() was routed to
+# Bedrock Converse, including Gemini IDs. The gate must require api_provider
+# == "bedrock" before that fallback fires.
+# ---------------------------------------------------------------------------
+
+
+class _FakeBlock:
+    def __init__(self, text):
+        self.type = "text"
+        self.text = text
+
+
+class _FakeUsage:
+    def __init__(self, in_tok=10, out_tok=20):
+        self.input_tokens = in_tok
+        self.output_tokens = out_tok
+
+
+class _FakeResponse:
+    def __init__(self, text):
+        self.content = [_FakeBlock(text)]
+        self.usage = _FakeUsage()
+
+
+class _FakeMessages:
+    def __init__(self, recorder):
+        self._rec = recorder
+
+    async def create(self, **kwargs):
+        self._rec.append(kwargs)
+        # Architect call returns a "contract", executor returns final candidate
+        text = "GENERATED_CANDIDATE" if "writer executing" in kwargs["messages"][0]["content"] else "CONTRACT_TEXT"
+        return _FakeResponse(text)
+
+
+class _FakeClient:
+    def __init__(self):
+        self.calls: list[dict] = []
+        self.messages = _FakeMessages(self.calls)
+
+
+def _split_brief(provider: str, model: str) -> SetupBrief:
+    return SetupBrief(
+        artifact="test artifact",
+        artifact_type="single-file",
+        criteria={"quality": "good"},
+        iterations=1,
+        mode="seedless",
+        api_provider=provider,
+        generator_model=model,
+        clerk_model=model,
+        executor_model=model,
+        output_dir="/tmp",
+    )
+
+
+async def test_split_generate_google_does_not_use_bedrock_converse(monkeypatch):
+    """Regression: Gemini model id must NOT route to invoke_bedrock_model
+    just because is_anthropic_model() returns False."""
+    fake_client = _FakeClient()
+    monkeypatch.setattr(
+        "simmer_sdk.client.create_async_client",
+        lambda brief, role="default": fake_client,
+    )
+
+    # If the gate is broken, this raises (boto3 has no creds in tests)
+    def explode(*args, **kwargs):
+        raise AssertionError("invoke_bedrock_model should not be called for api_provider='google'")
+    monkeypatch.setattr("simmer_sdk.client.invoke_bedrock_model", explode)
+
+    brief = _split_brief(provider="google", model="gemini-3.5-flash")
+    result = await _split_generate(
+        brief=brief,
+        iteration=1,
+        current_candidate="seed text",
+        asi="improve specificity",
+    )
+
+    assert isinstance(result, GeneratorOutput)
+    # Two calls: architect (contract) + executor (final candidate)
+    assert len(fake_client.calls) == 2
+    assert result.candidate == "GENERATED_CANDIDATE"
+
+
+async def test_split_generate_bedrock_with_claude_uses_messages_create(monkeypatch):
+    """Bedrock + Claude model id should still go through messages.create (not Converse)."""
+    fake_client = _FakeClient()
+    monkeypatch.setattr(
+        "simmer_sdk.client.create_async_client",
+        lambda brief, role="default": fake_client,
+    )
+
+    def explode(*args, **kwargs):
+        raise AssertionError("Claude model on Bedrock should use SDK, not Converse")
+    monkeypatch.setattr("simmer_sdk.client.invoke_bedrock_model", explode)
+
+    brief = _split_brief(provider="bedrock", model="claude-sonnet-4-6")
+    await _split_generate(
+        brief=brief,
+        iteration=1,
+        current_candidate="seed",
+        asi="x",
+    )
+
+    assert len(fake_client.calls) == 2
+
+
+async def test_split_generate_bedrock_with_non_claude_uses_converse(monkeypatch):
+    """Bedrock + non-Claude model id is the ONE case where Converse fires."""
+    fake_client = _FakeClient()
+    monkeypatch.setattr(
+        "simmer_sdk.client.create_async_client",
+        lambda brief, role="default": fake_client,
+    )
+
+    converse_called = {"count": 0}
+    async def fake_converse(model_id, prompt, brief, max_tokens=8192):
+        converse_called["count"] += 1
+        return ("FROM_BEDROCK", {"input_tokens": 1, "output_tokens": 2})
+    monkeypatch.setattr("simmer_sdk.client.invoke_bedrock_model", fake_converse)
+    # Also patch via the from-import site in generator.py
+    monkeypatch.setattr("simmer_sdk.generator.invoke_bedrock_model", fake_converse, raising=False)
+
+    brief = _split_brief(provider="bedrock", model="amazon.nova-lite-v1:0")
+    await _split_generate(
+        brief=brief,
+        iteration=1,
+        current_candidate="seed",
+        asi="x",
+    )
+
+    # Architect (Claude path via messages.create) + executor (Converse) = 1 messages.create call
+    assert len(fake_client.calls) == 1
+    assert converse_called["count"] == 1

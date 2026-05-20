@@ -36,6 +36,12 @@ PRICING: dict[str, tuple[float, float]] = {
     "us.anthropic.claude-haiku-4-5-20251001-v1:0": (0.80, 4.00),
     "us.anthropic.claude-opus-4-6-v1": (15.00, 75.00),
     "us.anthropic.claude-opus-4-5-20251101-v1:0": (15.00, 75.00),
+    # Google Gemini — thoughtsTokenCount is billed as output, so output_tokens
+    # in CallRecord already includes thinking tokens (see _gemini_adapter.py).
+    "gemini-3.5-flash": (1.50, 9.00),
+    "gemini-flash-latest": (1.50, 9.00),
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.5-pro": (1.25, 10.00),
 }
 
 

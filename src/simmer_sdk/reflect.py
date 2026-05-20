@@ -222,7 +222,7 @@ async def condense_key_change_llm(report: str, brief: SetupBrief | None = None, 
     try:
         if brief:
             from simmer_sdk.client import create_async_client, map_model_id
-            client = create_async_client(brief)
+            client = create_async_client(brief, role="clerk")
             resolved_model = map_model_id(model, brief)
         else:
             import anthropic
@@ -679,7 +679,7 @@ async def dispatch_reflect(
         from simmer_sdk.client import create_async_client, map_model_id
         reflect_text = await run_api_agent(
             prompt=prompt,
-            client=create_async_client(brief),
+            client=create_async_client(brief, role="clerk"),
             model=map_model_id(model, brief) if brief else model,
             tools=["Read", "Write", "Glob"],
             custom_tools=brief.custom_tools if brief else None,
