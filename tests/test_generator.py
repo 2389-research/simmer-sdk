@@ -1,6 +1,8 @@
 # ABOUTME: Tests for generator.py — _parse_generator_output and split-generator routing.
 # ABOUTME: Verifies candidate, report, and files_modified extraction from subagent result text.
 
+import tempfile
+
 import pytest
 
 from simmer_sdk.generator import GeneratorOutput, _parse_generator_output, _split_generate
@@ -159,7 +161,7 @@ def _split_brief(provider: str, model: str) -> SetupBrief:
         generator_model=model,
         clerk_model=model,
         executor_model=model,
-        output_dir="/tmp",
+        output_dir=tempfile.gettempdir(),
     )
 
 

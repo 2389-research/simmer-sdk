@@ -184,12 +184,17 @@ async def _call(client: GeminiClient, system: str, user: str, max_tokens: int = 
 
 
 def parse_scores(judge_text: str) -> dict:
-    scores: dict[str, int] = {}
+    """Extract per-criterion scores. Accepts both integer (7/10) and decimal
+    (7.5/10) forms — judges drift between them between iterations."""
+    scores: dict[str, float] = {}
     for match in re.finditer(
-        r"\*{0,2}(coverage|precision|taxonomy_quality)\*{0,2}:\s*(\d+)/10",
+        r"\*{0,2}(coverage|precision|taxonomy_quality)\*{0,2}:\s*(\d+(?:\.\d+)?)/10",
         judge_text, re.IGNORECASE,
     ):
-        scores[match.group(1).lower()] = int(match.group(2))
+        raw = float(match.group(2))
+        # Preserve int when the score is whole (8.0 → 8) so downstream
+        # consumers that expect ints still work for the common case.
+        scores[match.group(1).lower()] = int(raw) if raw.is_integer() else raw
     composite = 0.0
     comp_match = re.search(r"COMPOSITE:\s*\*{0,2}([\d.]+)/10", judge_text, re.IGNORECASE)
     if comp_match:
@@ -217,7 +222,7 @@ async def main() -> int:
     minimal_client = GeminiClient(api_key=api_key, thinking_level="MINIMAL")
     judge_client = GeminiClient(api_key=api_key, thinking_level="HIGH")
 
-    run_id = f"gemini_pipeline_{datetime.now().strftime('%H%M')}"
+    run_id = f"gemini_pipeline_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     output_dir = Path("tests/orrery_runs") / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -358,7 +363,7 @@ async def main() -> int:
     print("RESULTS")
     print(f"{'=' * 60}")
     print(f"Best: iteration {best_iteration} ({best_composite}/10)")
-    print(f"\nTrajectory:")
+    print("\nTrajectory:")
     for r in trajectory:
         reg = " REGRESSION" if r["regressed"] else ""
         print(f"  iter {r['iteration']}: {r['composite']}/10  scores={r['scores']}{reg}")

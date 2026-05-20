@@ -84,7 +84,17 @@ class _Messages:
         system: str | None = None,
         **kwargs: Any,
     ) -> _GeminiResponse:
-        # tools=, tool_choice= etc. are silently dropped — see module docstring.
+        # Fail fast on tool-use kwargs — the adapter does not translate
+        # Anthropic tool_use to Gemini functionCall. Silently dropping these
+        # makes agent loops look "successful" while skipping required behavior.
+        for unsupported in ("tools", "tool_choice", "tool_use"):
+            if unsupported in kwargs and kwargs[unsupported]:
+                raise NotImplementedError(
+                    f"GeminiClient does not yet support {unsupported}=. "
+                    "Tool-use translation (Anthropic tool_use ↔ Gemini "
+                    "functionCall) is not implemented. Use split_generator=True "
+                    "with a string artifact, or switch api_provider away from 'google'."
+                )
         return await self._client._post_generate(
             model=model,
             max_tokens=max_tokens,
@@ -150,16 +160,18 @@ class GeminiClient:
             "Content-Type": "application/json",
             "X-goog-api-key": self._api_key,
         }
-        # Retry on transient 5xx / timeouts. Gemini's free tier 503s under load.
+        # Retry on transient 429 / 5xx / timeouts. Gemini's free tier 503s under
+        # load and 429s on burst. 4xx other than 429 are programmer errors.
         import asyncio
         last_exc: Exception | None = None
         async with httpx.AsyncClient(timeout=self._timeout) as http:
             for attempt in range(4):
                 try:
                     resp = await http.post(url, json=payload, headers=headers)
-                    if resp.status_code >= 500:
+                    if resp.status_code == 429 or resp.status_code >= 500:
                         last_exc = httpx.HTTPStatusError(
-                            f"{resp.status_code} from Gemini", request=resp.request, response=resp
+                            f"{resp.status_code} from Gemini",
+                            request=resp.request, response=resp,
                         )
                         await asyncio.sleep(2 ** attempt)
                         continue
@@ -172,11 +184,19 @@ class GeminiClient:
             else:
                 raise last_exc if last_exc else RuntimeError("Gemini call failed without exception")
 
-        text = ""
+        # Surface missing candidates rather than silently returning empty text —
+        # Gemini returns no candidate when the response is blocked by safety
+        # filters or hits a stop reason like RECITATION/SAFETY/MAX_TOKENS-no-text.
         candidates = data.get("candidates", [])
-        if candidates:
-            parts = candidates[0].get("content", {}).get("parts", [])
-            text = "".join(p.get("text", "") for p in parts if isinstance(p, dict))
+        if not candidates:
+            prompt_feedback = data.get("promptFeedback", {})
+            raise RuntimeError(
+                f"Gemini returned no candidates. "
+                f"promptFeedback={prompt_feedback!r} "
+                f"usageMetadata={data.get('usageMetadata', {})!r}"
+            )
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text = "".join(p.get("text", "") for p in parts if isinstance(p, dict))
 
         usage = data.get("usageMetadata", {})
         # Thinking tokens are billed as output — count them in output_tokens

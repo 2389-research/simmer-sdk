@@ -271,8 +271,37 @@ async def test_request_omits_thinking_config_when_level_none(patch_httpx):
 
 
 @pytest.mark.asyncio
-async def test_request_silently_drops_unknown_kwargs(patch_httpx):
-    """tools=, tool_choice=, etc. should be ignored (not forwarded)."""
+async def test_create_raises_on_tools_kwarg(patch_httpx):
+    """Tool-use isn't translated to Gemini's functionCall — must fail loudly."""
+    patch_httpx([_ok_response()])
+    client = GeminiClient(api_key="k")
+
+    with pytest.raises(NotImplementedError, match="tools"):
+        await client.messages.create(
+            model="gemini-3.5-flash",
+            max_tokens=100,
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[{"name": "Read", "description": "..."}],
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_raises_on_tool_choice_kwarg(patch_httpx):
+    patch_httpx([_ok_response()])
+    client = GeminiClient(api_key="k")
+
+    with pytest.raises(NotImplementedError, match="tool_choice"):
+        await client.messages.create(
+            model="gemini-3.5-flash",
+            max_tokens=100,
+            messages=[{"role": "user", "content": "hi"}],
+            tool_choice="auto",
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_ignores_empty_tools_list(patch_httpx):
+    """tools=[] (falsy) should pass through — only non-empty raises."""
     fake = patch_httpx([_ok_response()])
     client = GeminiClient(api_key="k")
 
@@ -280,13 +309,10 @@ async def test_request_silently_drops_unknown_kwargs(patch_httpx):
         model="gemini-3.5-flash",
         max_tokens=100,
         messages=[{"role": "user", "content": "hi"}],
-        tools=[{"name": "Read", "description": "..."}],
-        tool_choice="auto",
+        tools=[],
+        tool_choice=None,
     )
-
-    payload = fake.calls[0]["json"]
-    assert "tools" not in payload
-    assert "tool_choice" not in payload
+    assert "tools" not in fake.calls[0]["json"]
 
 
 # ---------------------------------------------------------------------------
@@ -330,8 +356,14 @@ async def test_response_thoughts_counted_as_output_tokens(patch_httpx):
 
 
 @pytest.mark.asyncio
-async def test_response_empty_candidates_returns_empty_text(patch_httpx):
-    payload = {"candidates": [], "usageMetadata": {"promptTokenCount": 5}}
+async def test_response_empty_candidates_raises(patch_httpx):
+    """No candidates = blocked / safety-filtered / max-tokens-no-text.
+    Surfacing this as an error prevents silent empty-string propagation."""
+    payload = {
+        "candidates": [],
+        "promptFeedback": {"blockReason": "SAFETY"},
+        "usageMetadata": {"promptTokenCount": 5},
+    }
     resp_obj = MagicMock(spec=httpx.Response)
     resp_obj.status_code = 200
     resp_obj.json.return_value = payload
@@ -339,14 +371,12 @@ async def test_response_empty_candidates_returns_empty_text(patch_httpx):
     patch_httpx([resp_obj])
 
     client = GeminiClient(api_key="k")
-    resp = await client.messages.create(
-        model="gemini-3.5-flash",
-        max_tokens=100,
-        messages=[{"role": "user", "content": "x"}],
-    )
-    assert resp.content[0].text == ""
-    assert resp.usage.input_tokens == 5
-    assert resp.usage.output_tokens == 0
+    with pytest.raises(RuntimeError, match="no candidates"):
+        await client.messages.create(
+            model="gemini-3.5-flash",
+            max_tokens=100,
+            messages=[{"role": "user", "content": "x"}],
+        )
 
 
 @pytest.mark.asyncio
@@ -376,6 +406,27 @@ async def test_response_multipart_text_concatenated(patch_httpx):
 # ---------------------------------------------------------------------------
 # Retry behavior
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_retries_on_429_then_succeeds(patch_httpx, monkeypatch):
+    """Rate-limit responses are transient — must retry, not fail immediately."""
+    import asyncio
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock(return_value=None))
+
+    fake = patch_httpx([
+        _err_response(429),
+        _ok_response(text="recovered"),
+    ])
+
+    client = GeminiClient(api_key="k")
+    resp = await client.messages.create(
+        model="gemini-3.5-flash",
+        max_tokens=100,
+        messages=[{"role": "user", "content": "x"}],
+    )
+    assert resp.content[0].text == "recovered"
+    assert len(fake.calls) == 2
 
 
 @pytest.mark.asyncio

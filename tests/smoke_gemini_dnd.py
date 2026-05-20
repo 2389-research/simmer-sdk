@@ -53,9 +53,9 @@ async def main() -> int:
     print("="*60)
     print(f"\nSeed artifact ({len(DND_HOOK_SEED)} chars):\n{DND_HOOK_SEED}\n")
     print(f"Criteria: {list(CRITERIA.keys())}")
-    print(f"Iterations: 2  |  judge=HIGH, generator/clerk=MINIMAL")
-    print(f"Models: generator/judge/clerk all = gemini-3.5-flash")
-    print(f"split_generator=True (bypasses agent tool_use path)\n")
+    print("Iterations: 2  |  judge=HIGH, generator/clerk=MINIMAL")
+    print("Models: generator/judge/clerk all = gemini-3.5-flash")
+    print("split_generator=True (bypasses agent tool_use path)\n")
 
     result = await refine(
         artifact=DND_HOOK_SEED,
@@ -86,7 +86,7 @@ async def main() -> int:
     print(f"\nBest iteration: {result.best_iteration}")
     print(f"Best composite: {result.composite}")
     print(f"Best scores: {result.best_scores}")
-    print(f"\nTrajectory:")
+    print("\nTrajectory:")
     for rec in result.trajectory:
         reg = " [REGRESSED]" if rec.regressed else ""
         print(f"  iter {rec.iteration}: composite={rec.composite}{reg} | "
@@ -95,17 +95,18 @@ async def main() -> int:
     if result.usage:
         print("\n" + result.usage.summary())
 
+    # Sanity assertions first — surface bugs with their proper messages
+    # rather than crashing in len()/slicing below.
+    assert len(result.trajectory) >= 1, "No iterations completed"
+    assert result.best_candidate, "No best candidate returned"
+    assert all(len(r.scores) >= 3 for r in result.trajectory), \
+        f"Judge failed to score all criteria: {[r.scores for r in result.trajectory]}"
+
     print(f"\nOutput dir: {result.output_dir}")
     print(f"Best candidate ({len(result.best_candidate)} chars):\n")
     print(result.best_candidate[:1500])
     if len(result.best_candidate) > 1500:
         print(f"\n... [{len(result.best_candidate) - 1500} more chars truncated]")
-
-    # Sanity assertions
-    assert len(result.trajectory) >= 1, "No iterations completed"
-    assert result.best_candidate, "No best candidate returned"
-    assert all(len(r.scores) >= 3 for r in result.trajectory), \
-        f"Judge failed to score all criteria: {[r.scores for r in result.trajectory]}"
 
     print("\n  PASS — refine() completed end-to-end on Gemini backend")
     return 0
