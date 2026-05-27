@@ -241,7 +241,10 @@ def render(view: RunView, raw: bool = False) -> None:
                     expanded=False,
                 ):
                     # training-transcript view
-                    if st.checkbox("show as training transcript", key=f"tx-{sess.session_id}"):
+                    if st.checkbox(
+                        "show as training transcript",
+                        key=f"tx-{it.iteration}-{sess.session_id}-{sess.role or 'unknown'}",
+                    ):
                         st.json(session_as_messages(sess))
                     for turn in sess.turns:
                         _render_turn(turn, raw)

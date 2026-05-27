@@ -88,7 +88,11 @@ class RunView:
     def event_counts(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for e in self.events:
-            counts[e["type"]] = counts.get(e["type"], 0) + 1
+            if not isinstance(e, dict):
+                continue
+            etype = e.get("type")
+            if etype:
+                counts[etype] = counts.get(etype, 0) + 1
         return counts
 
     @property
@@ -114,8 +118,8 @@ class RunView:
 
 def parse_events(events: list[dict]) -> RunView:
     """Group a list of event dicts into a RunView."""
-    run_event = next((e for e in events if e.get("type") == "run"), None)
-    outcome = next((e for e in events if e.get("type") == "outcome"), None)
+    run_event = next((e for e in events if isinstance(e, dict) and e.get("type") == "run"), None)
+    outcome = next((e for e in events if isinstance(e, dict) and e.get("type") == "outcome"), None)
 
     view = RunView(
         run_id=(run_event or {}).get("run_id"),
@@ -133,6 +137,8 @@ def parse_events(events: list[dict]) -> RunView:
         return iters[idx]
 
     for e in events:
+        if not isinstance(e, dict):
+            continue
         etype = e.get("type")
         idx = e.get("iteration")
         if etype == "iteration":
@@ -172,10 +178,12 @@ def load_run(path: str | Path) -> RunView:
             if not line:
                 continue
             try:
-                events.append(json.loads(line))
+                event = json.loads(line)
             except json.JSONDecodeError:
                 # A torn tail line (e.g. crash mid-write) — skip, keep the rest.
                 continue
+            if isinstance(event, dict):  # ignore valid-but-non-object lines
+                events.append(event)
     return parse_events(events)
 
 

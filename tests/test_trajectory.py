@@ -350,6 +350,37 @@ async def test_redact_applied_to_emitted_events(tmp_path):
     assert "***redacted***" in tc["result"]
 
 
+async def test_refine_clears_logger_context_on_exception(tmp_path, monkeypatch):
+    """If refine() raises mid-run, the finally must release the active logger so
+    stale context can't leak into later work in the same task (CodeRabbit #14)."""
+    import sys
+
+    from simmer_sdk.trajectory import get_active_logger
+
+    # The bare name `simmer_sdk.refine` resolves to the function (shadowed by the
+    # package __init__), so reach the actual module via sys.modules.
+    refine_module = sys.modules["simmer_sdk.refine"]
+    refine_fn = refine_module.refine
+
+    def _boom(brief):
+        raise RuntimeError("boom")
+
+    # Raise right after the logger is armed (no network reached).
+    monkeypatch.setattr(refine_module, "_load_initial_candidate", _boom)
+    set_active_logger(None)
+    with pytest.raises(RuntimeError, match="boom"):
+        await refine_fn(
+            artifact="some pasted text",
+            criteria={"a": "what good looks like"},
+            iterations=1,
+            mode="from-paste",
+            judge_mode="single",
+            output_dir=str(tmp_path / "out"),
+            trajectory_log_dir=str(tmp_path / "logs"),
+        )
+    assert get_active_logger() is None  # finally released it despite the raise
+
+
 async def test_no_writer_task_or_handle_leak_on_emit(tmp_path):
     # Synchronous design: there is no persistent file handle or writer task,
     # so emitting then never calling aclose() leaks nothing and data is durable.

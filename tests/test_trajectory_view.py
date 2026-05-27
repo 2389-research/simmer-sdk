@@ -80,7 +80,7 @@ async def test_run_view_structure(tmp_path):
     idxs = [it.iteration for it in view.iterations]
     assert idxs == [0, 1, 2]
 
-    seed, it1, it2 = view.iterations
+    seed, it1, _ = view.iterations
     assert seed.composite == 5.5
     assert it1.scores == {"a": 7, "b": 8}
 
