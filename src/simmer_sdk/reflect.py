@@ -677,11 +677,17 @@ async def dispatch_reflect(
     elif dispatch == "api":
         from simmer_sdk.api_agent import run_api_agent
         from simmer_sdk.client import create_async_client, map_model_id
+        # Gemini adapter rejects tools=. The clerk's Write of trajectory.md is
+        # duplicative — Python writes it via write_trajectory_md. The parsed
+        # structured text is what downstream code consumes.
+        reflect_tools: list[str] | None = ["Read", "Write", "Glob"]
+        if brief and brief.api_provider == "google":
+            reflect_tools = None
         reflect_text = await run_api_agent(
             prompt=prompt,
             client=create_async_client(brief, role="clerk"),
             model=map_model_id(model, brief) if brief else model,
-            tools=["Read", "Write", "Glob"],
+            tools=reflect_tools,
             custom_tools=brief.custom_tools if brief else None,
             cwd=str(output_dir),
             max_turns=5,
