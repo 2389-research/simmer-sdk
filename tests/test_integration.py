@@ -74,6 +74,49 @@ async def test_dnd_adventure_hook_seedless(has_api_key):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_trajectory_logging_end_to_end(has_api_key):
+    """The full refine() loop wires the trajectory logger: a JSONL event log is
+    written with run/iteration/llm_call/outcome events, correctly correlated."""
+    import glob
+
+    from simmer_sdk.trajectory_view import load_run
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        logdir = Path(tmpdir) / "trajectories"
+        result = await refine(
+            artifact="A tagline for a CLI tool that refines prompts.",
+            criteria={"punchiness": "tight, no filler", "clarity": "obvious what it does"},
+            iterations=1,
+            mode="from-paste",
+            judge_mode="single",
+            output_dir=Path(tmpdir) / "simmer",
+            generator_model="claude-haiku-4-5",
+            judge_model="claude-haiku-4-5",
+            clerk_model="claude-haiku-4-5",
+            trajectory_log_dir=str(logdir),
+        )
+
+        files = glob.glob(str(logdir / "*.jsonl"))
+        assert len(files) == 1, f"expected one trajectory file, got {files}"
+        view = load_run(files[0])
+
+    counts = view.event_counts
+    # The orchestration events are present
+    assert counts.get("run") == 1
+    assert counts.get("outcome") == 1
+    assert counts.get("iteration", 0) >= 2          # seed (0) + iteration 1
+    assert counts.get("llm_call", 0) >= 2           # at least generator + judge turns
+    # Roles were captured at the client boundary
+    roles = {s.role for it in view.iterations for s in it.sessions}
+    assert "generator" in roles and "judge" in roles
+    # Outcome agrees with the returned result
+    assert view.outcome["best_iteration"] == result.best_iteration
+    # Iterations 0 and 1 both recorded
+    assert {0, 1}.issubset({it.iteration for it in view.iterations})
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_text_refinement_from_paste(has_api_key):
     """Full loop: from-paste mode, single judge, 2 iterations."""
     with tempfile.TemporaryDirectory() as tmpdir:

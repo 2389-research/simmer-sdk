@@ -231,6 +231,15 @@ async def _run_evaluator(
             output_parts.append(stderr)
         if result.returncode != 0:
             output_parts.append(f"EXIT CODE: {result.returncode}")
+        from simmer_sdk.trajectory import emit as _emit
+        _emit(
+            "evaluator",
+            iteration=iteration,
+            cmd=cmd,
+            stdout=stdout,
+            stderr=stderr,
+            exit_code=result.returncode,
+        )
         return "\n".join(output_parts)
     except TimeoutError:
         return "EVALUATOR TIMEOUT: command exceeded 3600s"
@@ -309,6 +318,9 @@ async def refine(
     split_generator: bool = False,
     split_generator_mode: str = "always",
     executor_model: str | None = None,
+    # Optional — trajectory logging (raw JSONL event log of all LLM/tool calls)
+    trajectory_log_dir: str | None = None,
+    trajectory_redact: Callable[[str], str] | bool | None = None,
     # Optional — callbacks
     on_iteration: OnIterationCallback | None = None,
     on_plateau: OnPlateauCallback | None = None,
@@ -395,6 +407,7 @@ async def refine(
         split_generator=split_generator,
         split_generator_mode=split_generator_mode,
         executor_model=executor_model,
+        trajectory_log_dir=trajectory_log_dir,
     )
 
     brief = resolve_brief(brief)
@@ -405,6 +418,36 @@ async def refine(
     from simmer_sdk.usage import UsageTracker
     usage_tracker = UsageTracker()
     brief._usage_tracker = usage_tracker  # type: ignore[attr-defined]
+
+    # Trajectory logging — raw, append-only JSONL event stream of every LLM and
+    # tool call. Off (zero overhead) unless trajectory_log_dir is set. Capture
+    # happens at the client + execute_tool boundaries via context vars, so the
+    # role logic is untouched. seq=0 events use iteration 0 (the seed).
+    from simmer_sdk.trajectory import set_active_logger as _reset_active_logger
+    # Defensively clear any logger left active by a prior run in this task that
+    # raised before teardown (contextvars persist within a task). Without this,
+    # a later run with logging off could write into the earlier run's file.
+    _reset_active_logger(None)
+
+    trajectory_logger = None
+    if brief.trajectory_log_dir:
+        from simmer_sdk.trajectory import (
+            TrajectoryLogger,
+            default_redactor,
+            run_config,
+            set_active_logger,
+            set_iteration,
+        )
+        _redact = default_redactor if trajectory_redact is True else (
+            trajectory_redact if callable(trajectory_redact) else None
+        )
+        trajectory_logger = TrajectoryLogger(
+            log_dir=brief.trajectory_log_dir, redact=_redact
+        )
+        await trajectory_logger.start()
+        set_active_logger(trajectory_logger)
+        set_iteration(0)
+        trajectory_logger.emit("run", config=run_config(brief))
 
     out_path = Path(brief.output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -531,6 +574,16 @@ async def refine(
         primary=brief.primary,
     )
     trajectory.append(record)
+    if trajectory_logger is not None:
+        trajectory_logger.emit(
+            "iteration",
+            iteration=record.iteration,
+            scores=record.scores,
+            composite=record.composite,
+            key_change=record.key_change,
+            asi=record.asi,
+            regressed=record.regressed,
+        )
     write_trajectory_md(trajectory, list(brief.criteria.keys()), find_best(trajectory, brief.primary), brief.primary, out_path)
 
     if judge_result.deliberation_summary:
@@ -557,6 +610,9 @@ async def refine(
     max_iterations = brief.iterations
 
     for i in range(1, max_iterations + 1):
+        if trajectory_logger is not None:
+            set_iteration(i)
+
         # a) Check for regression rollback
         best_idx = find_best(trajectory, brief.primary)
         regression_note = None
@@ -700,6 +756,17 @@ async def refine(
 
         trajectory.append(record)
 
+        if trajectory_logger is not None:
+            trajectory_logger.emit(
+                "iteration",
+                iteration=record.iteration,
+                scores=record.scores,
+                composite=record.composite,
+                key_change=record.key_change,
+                asi=record.asi,
+                regressed=record.regressed,
+            )
+
         # Rewrite trajectory.md from Python using authoritative scores.
         # The reflect agent's trajectory table may have wrong scores
         # (seed scores carried forward, board consensus missed, etc.).
@@ -762,6 +829,17 @@ async def refine(
         (out_path / "result.md").write_text(best_candidate, encoding="utf-8")
 
     final_stable_wins = track_stable_wins(trajectory)
+
+    if trajectory_logger is not None:
+        trajectory_logger.emit(
+            "outcome",
+            best_iteration=best_record.iteration,
+            best_scores=best_record.scores,
+            composite=best_record.composite,
+            total_usage=usage_tracker.to_dict(),
+        )
+        await trajectory_logger.aclose()
+        set_active_logger(None)
 
     return SimmerResult(
         best_candidate=best_candidate,

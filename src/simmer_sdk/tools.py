@@ -206,6 +206,32 @@ TOOL_ALIASES: dict[str, str] = {
 
 
 def execute_tool(name: str, inputs: dict, cwd: str) -> str:
+    """Execute a tool by name, emitting a trajectory ``tool_call`` event.
+
+    The event capture is a no-op when no trajectory logger is active, so this
+    adds zero overhead in normal runs.
+    """
+    import time as _time
+
+    from simmer_sdk.trajectory import emit as _emit
+
+    start = _time.perf_counter()
+    result = _execute_tool_impl(name, inputs, cwd)
+    result_str = str(result)
+    MAX = 20000
+    _emit(
+        "tool_call",
+        name=name,
+        input=inputs,
+        result=result_str[:MAX],
+        result_orig_len=len(result_str),
+        truncated=len(result_str) > MAX,
+        duration_s=_time.perf_counter() - start,
+    )
+    return result
+
+
+def _execute_tool_impl(name: str, inputs: dict, cwd: str) -> str:
     """Execute a tool by name. Returns result string (never raises)."""
     # Resolve aliases
     canonical = TOOL_ALIASES.get(name, name)
