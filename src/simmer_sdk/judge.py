@@ -200,10 +200,12 @@ async def dispatch_judge(
         from simmer_sdk.api_agent import run_api_agent
         from simmer_sdk.client import create_async_client, map_model_id
         # Gemini adapter does not translate Anthropic tool_use ↔ Gemini
-        # functionCall, so it rejects tools=. For string artifacts the
-        # candidate is inlined into the prompt and Read/Grep/Glob are unused.
+        # functionCall, so it rejects tools= for ALL calls. Disable tools on
+        # Google: string artifacts inline the candidate (Read/Grep/Glob unused
+        # anyway); workspace judging on Gemini is inherently tool-less since the
+        # alternative is a hard failure in run_api_agent.
         judge_tools: Optional[list[str]] = ["Read", "Grep", "Glob"]
-        if brief.api_provider == "google" and not is_workspace:
+        if brief.api_provider == "google":
             judge_tools = None
         result_text = await run_api_agent(
             prompt=prompt,
