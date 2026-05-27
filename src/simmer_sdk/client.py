@@ -79,13 +79,31 @@ def _resolve_gemini_thinking_level(brief: SetupBrief, role: str) -> str | None:
 
 
 def create_async_client(brief: SetupBrief, role: str = "default"):
-    """Create an async Anthropic client based on the API provider config.
+    """Create an async model client based on the API provider config.
 
     Returns AsyncAnthropic for direct API and Ollama, AsyncAnthropicBedrock
     for Bedrock, GeminiClient for Google. ``role`` is only used for Google
     to pick the right per-role thinking level (judge/generator/clerk).
     Ollama uses the Anthropic SDK pointed at Ollama's /v1/messages endpoint.
+
+    When a trajectory logger is active, the returned client is transparently
+    wrapped so every ``messages.create`` call is logged, and this call begins a
+    new agent session (one client == one logical agent session in this codebase).
     """
+    client = _build_raw_client(brief, role)
+
+    # Trajectory logging: begin a session for this client and wrap it. No-op
+    # (returns the raw client) when no logger is active.
+    from simmer_sdk.trajectory import begin_session, get_active_logger, wrap_client
+
+    if get_active_logger() is not None:
+        begin_session(role)
+        return wrap_client(client)
+    return client
+
+
+def _build_raw_client(brief: SetupBrief, role: str = "default"):
+    """Construct the underlying provider client (no logging wrapper)."""
     if brief.api_provider == "bedrock":
         from anthropic import AsyncAnthropicBedrock
         return AsyncAnthropicBedrock(

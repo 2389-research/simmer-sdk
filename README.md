@@ -196,6 +196,48 @@ async def on_plateau(trajectory):
 result = await refine(..., on_iteration=on_iteration, on_plateau=on_plateau)
 ```
 
+### Trajectory Logging
+
+Pass `trajectory_log_dir` to capture a complete, raw, append-only **JSONL event log** of every LLM call and tool call across the run — generator, every judge, deliberation, clerk, and reflect. It's off by default (zero overhead); when on, capture happens at the model-client and tool boundaries, so nothing in the role logic changes.
+
+```python
+result = await refine(..., trajectory_log_dir="trajectories")
+# → trajectories/trajectory_<timestamp>_<run_id>.jsonl
+```
+
+Each line is one event, tagged with `run_id` / `iteration` / `session_id` / `role` / monotonic `seq`:
+
+| event | captured |
+|-------|----------|
+| `run` | config snapshot (secrets stripped) |
+| `iteration` | per-round scores, composite, key_change, asi, regressed |
+| `llm_call` | full request (model, system, messages, tools) + response (content, stop_reason, usage) + duration |
+| `tool_call` | tool name, input, result (with original length / truncation flag), duration |
+| `evaluator` | evaluator command + stdout/stderr/exit_code |
+| `outcome` | best iteration, scores, total usage |
+
+The log is **event-sourced**: sessions and iterations are reconstructed by grouping on IDs, so a crashed run still parses (incomplete sessions just have fewer turns), concurrent judges never interleave, and the raw log can be projected into anything — a UI, a cost report, or agent training data. Writes are synchronous and atomic per event (no writer task or file handle to leak on a crash).
+
+Tool results and prompts are captured verbatim, so pass `trajectory_redact=True` (or a custom `str -> str` callable) to scrub secrets before they're written:
+
+```python
+await refine(..., trajectory_log_dir="trajectories", trajectory_redact=True)
+```
+
+See [`docs/trajectory-logging.md`](docs/trajectory-logging.md) for the full schema, redaction, and the `RunView` projection API.
+
+### Inspecting trajectories (Streamlit viewer)
+
+A read-only inspector ships in `viewer/`. Install the optional extra and point it at a log dir:
+
+```bash
+uv sync --extra viewer
+uv run --extra viewer streamlit run viewer/app.py trajectories
+# or launch bare and upload a trajectory_*.jsonl in the sidebar
+```
+
+It renders the run as collapsible **iteration → session(role) → turn** panels (messages as a readable conversation, tool calls with inputs/results), a score table, a per-role cost breakdown, and a per-session "training transcript" view. Toggle **Raw JSON** in the sidebar for full untruncated events.
+
 ## Output
 
 `refine()` returns a `SimmerResult`:

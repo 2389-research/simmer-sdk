@@ -231,6 +231,15 @@ async def _run_evaluator(
             output_parts.append(stderr)
         if result.returncode != 0:
             output_parts.append(f"EXIT CODE: {result.returncode}")
+        from simmer_sdk.trajectory import emit as _emit
+        _emit(
+            "evaluator",
+            iteration=iteration,
+            cmd=cmd,
+            stdout=stdout,
+            stderr=stderr,
+            exit_code=result.returncode,
+        )
         return "\n".join(output_parts)
     except TimeoutError:
         return "EVALUATOR TIMEOUT: command exceeded 3600s"
@@ -309,6 +318,9 @@ async def refine(
     split_generator: bool = False,
     split_generator_mode: str = "always",
     executor_model: str | None = None,
+    # Optional — trajectory logging (raw JSONL event log of all LLM/tool calls)
+    trajectory_log_dir: str | None = None,
+    trajectory_redact: Callable[[str], str] | bool | None = None,
     # Optional — callbacks
     on_iteration: OnIterationCallback | None = None,
     on_plateau: OnPlateauCallback | None = None,
@@ -395,6 +407,7 @@ async def refine(
         split_generator=split_generator,
         split_generator_mode=split_generator_mode,
         executor_model=executor_model,
+        trajectory_log_dir=trajectory_log_dir,
     )
 
     brief = resolve_brief(brief)
@@ -406,371 +419,443 @@ async def refine(
     usage_tracker = UsageTracker()
     brief._usage_tracker = usage_tracker  # type: ignore[attr-defined]
 
-    out_path = Path(brief.output_dir)
-    out_path.mkdir(parents=True, exist_ok=True)
+    # Trajectory logging — raw, append-only JSONL event stream of every LLM and
+    # tool call. Off (zero overhead) unless trajectory_log_dir is set. Capture
+    # happens at the client + execute_tool boundaries via context vars, so the
+    # role logic is untouched. seq=0 events use iteration 0 (the seed).
+    from simmer_sdk.trajectory import set_active_logger as _reset_active_logger
+    # Defensively clear any logger left active by a prior run in this task that
+    # raised before teardown (contextvars persist within a task). Without this,
+    # a later run with logging off could write into the earlier run's file.
+    _reset_active_logger(None)
 
-    # Gap Fix 5: Compute evaluator_path so judges can read the evaluator script
-    evaluator_path: str | None = None
-    if brief.evaluator:
-        try:
-            parts_eval = shlex.split(brief.evaluator)
-            for part in parts_eval:
-                if part.endswith(('.py', '.sh', '.bash', '.rb', '.js')):
-                    evaluator_path = part
-                    break
-        except ValueError:
-            pass
-
-    # ------------------------------------------------------------------
-    # Step 1: Load initial candidate
-    # ------------------------------------------------------------------
-    current_candidate = _load_initial_candidate(brief)
-
-    trajectory: list[IterationRecord] = []
-    panel_summary: str | None = None
-    exploration_status: str = ""
-    seed_candidate: str | None = None
-    seed_scores: dict[str, int] | None = None
-    current_direction: str = ""
-
-    # Workspace mode: git commit tracking for rollback support
-    # Maps iteration number -> commit SHA
-    iteration_commits: dict[int, str] = {}
-    is_workspace = brief.artifact_type == "workspace"
-
-    if is_workspace:
-        # Snapshot seed state before any changes
-        sha = _git_commit_iteration(brief.artifact, 0)
-        if sha:
-            iteration_commits[0] = sha
-
-    # ------------------------------------------------------------------
-    # Step 2: Iteration 0 — Judge the seed
-    # ------------------------------------------------------------------
-    if detected_mode == "seedless":
-        # Generator creates the first candidate
-        gen_output = await dispatch_generator(
-            brief=brief,
-            iteration=0,
-            current_candidate=current_candidate,
-            asi="First iteration — generate initial candidate from the description and criteria.",
-            original_description=original_description,
+    trajectory_logger = None
+    if brief.trajectory_log_dir:
+        from simmer_sdk.trajectory import (
+            TrajectoryLogger,
+            default_redactor,
+            run_config,
+            set_active_logger,
+            set_iteration,
         )
-        # Read candidate from file if generator wrote it via Write tool
-        candidate_file = out_path / "iteration-0-candidate.md"
-        if candidate_file.exists():
-            current_candidate = candidate_file.read_text(encoding="utf-8")
-        else:
-            # Fallback: use agent output, write it ourselves
-            current_candidate = gen_output.candidate
-            candidate_file.write_text(current_candidate, encoding="utf-8")
-    else:
-        # Non-seedless: write the existing candidate as seed
-        if brief.artifact_type == "single-file":
-            (out_path / "iteration-0-candidate.md").write_text(
-                current_candidate, encoding="utf-8"
-            )
-
-    seed_candidate = current_candidate
-
-    # Judge the seed
-    candidate_path = str(out_path / "iteration-0-candidate.md") if brief.artifact_type == "single-file" else None
-
-    # Run evaluator on seed if present
-    evaluator_output = await _run_evaluator(
-        brief, candidate_path=candidate_path, iteration=0, output_dir=str(out_path)
-    ) if brief.evaluator else ""
-
-    # Gap Fix 6: Cache board composition before the loop
-    cached_board_judges: list[JudgeDefinition] | None = None
-    if brief.judge_mode == "board":
-        from simmer_sdk.judge_board import compose_judges
-        cached_board_judges = await compose_judges(
-            brief=brief,
-            problem_class=problem_class,
-            candidate_summary=current_candidate[:500],
+        _redact = default_redactor if trajectory_redact is True else (
+            trajectory_redact if callable(trajectory_redact) else None
         )
-
-    if brief.judge_mode == "board":
-        judge_result = await dispatch_board(
-            brief=brief,
-            problem_class=problem_class,
-            iteration=0,
-            candidate=current_candidate,
-            evaluator_output=evaluator_output or None,
-            candidate_path=candidate_path,
-            evaluator_path=evaluator_path,
-            cached_judges=cached_board_judges,
+        trajectory_logger = TrajectoryLogger(
+            log_dir=brief.trajectory_log_dir, redact=_redact
         )
-    else:
-        judge_result = await dispatch_judge(
-            brief=brief,
-            problem_class=problem_class,
-            iteration=0,
-            candidate=current_candidate,
-            evaluator_output=evaluator_output or None,
-            candidate_path=candidate_path,
-            evaluator_path=evaluator_path,
-        )
+        await trajectory_logger.start()
+        set_active_logger(trajectory_logger)
+        set_iteration(0)
+        trajectory_logger.emit("run", config=run_config(brief))
 
-    # Write raw judge output for downstream consumers
-    if judge_result.raw_text:
-        (out_path / "iteration-0-judgment.md").write_text(
-            judge_result.raw_text, encoding="utf-8"
-        )
+    try:
+        out_path = Path(brief.output_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
 
-    seed_scores = judge_result.scores
+        # Gap Fix 5: Compute evaluator_path so judges can read the evaluator script
+        evaluator_path: str | None = None
+        if brief.evaluator:
+            try:
+                parts_eval = shlex.split(brief.evaluator)
+                for part in parts_eval:
+                    if part.endswith(('.py', '.sh', '.bash', '.rb', '.js')):
+                        evaluator_path = part
+                        break
+            except ValueError:
+                pass
 
-    record = record_iteration(
-        iteration=0,
-        scores=judge_result.scores,
-        key_change="seed",
-        asi=judge_result.asi,
-        judge_mode=brief.judge_mode,
-        trajectory=trajectory,
-        primary=brief.primary,
-    )
-    trajectory.append(record)
-    write_trajectory_md(trajectory, list(brief.criteria.keys()), find_best(trajectory, brief.primary), brief.primary, out_path)
+        # ------------------------------------------------------------------
+        # Step 1: Load initial candidate
+        # ------------------------------------------------------------------
+        current_candidate = _load_initial_candidate(brief)
 
-    if judge_result.deliberation_summary:
-        panel_summary = judge_result.deliberation_summary
-        # Gap Fix 8: Parse DIRECTION from deliberation summary
-        direction_match = re.search(
-            r'DIRECTION:\s*\n?(.*?)(?:\n\n|\Z)',
-            judge_result.deliberation_summary,
-            re.DOTALL | re.IGNORECASE,
-        )
-        if direction_match:
-            current_direction = direction_match.group(1).strip()
+        trajectory: list[IterationRecord] = []
+        panel_summary: str | None = None
+        exploration_status: str = ""
+        seed_candidate: str | None = None
+        seed_scores: dict[str, int] | None = None
+        current_direction: str = ""
 
-    # Gap Fix 9: Pass trajectory table to callback
-    trajectory_table = format_trajectory_table(
-        trajectory, list(brief.criteria.keys()),
-        find_best(trajectory, brief.primary), brief.primary,
-    )
-    await _call_callback(on_iteration, record, trajectory, trajectory_table)
+        # Workspace mode: git commit tracking for rollback support
+        # Maps iteration number -> commit SHA
+        iteration_commits: dict[int, str] = {}
+        is_workspace = brief.artifact_type == "workspace"
 
-    # ------------------------------------------------------------------
-    # Step 3: Iterations 1-N
-    # ------------------------------------------------------------------
-    max_iterations = brief.iterations
-
-    for i in range(1, max_iterations + 1):
-        # a) Check for regression rollback
-        best_idx = find_best(trajectory, brief.primary)
-        regression_note = None
-        if trajectory[-1].regressed:
-            if is_workspace:
-                # Workspace: git rollback to best iteration's commit
-                best_iter = trajectory[best_idx].iteration
-                best_sha = iteration_commits.get(best_iter)
-                if best_sha:
-                    _git_rollback_workspace(
-                        brief.artifact, best_sha, str(out_path)
-                    )
-                current_candidate = f"[Workspace at {brief.artifact}]"
-            else:
-                current_candidate = _load_candidate_at(brief, out_path, trajectory[best_idx].iteration)
-            regression_note = (
-                f"The previous iteration regressed. You are starting from the best version "
-                f"(iteration {trajectory[best_idx].iteration}), not the latest."
-            )
-
-        # b) Generator
-        exploration_status = track_exploration(trajectory, brief.search_space)
-
-        gen_output = await dispatch_generator(
-            brief=brief,
-            iteration=i,
-            current_candidate=current_candidate,
-            asi=trajectory[-1].asi,
-            panel_summary=panel_summary,
-            exploration_status=exploration_status or None,
-            original_description=original_description,
-            regression_note=regression_note,
-        )
-
-        # Capture candidate after generator
         if is_workspace:
-            # Workspace: generator edited files in place. Commit the changes.
-            sha = _git_commit_iteration(brief.artifact, i)
+            # Snapshot seed state before any changes
+            sha = _git_commit_iteration(brief.artifact, 0)
             if sha:
-                iteration_commits[i] = sha
-            current_candidate = f"[Workspace at {brief.artifact}]"
-        else:
-            # Single-file: read candidate from file the generator wrote via Write tool.
-            candidate_file = out_path / f"iteration-{i}-candidate.md"
+                iteration_commits[0] = sha
+
+        # ------------------------------------------------------------------
+        # Step 2: Iteration 0 — Judge the seed
+        # ------------------------------------------------------------------
+        if detected_mode == "seedless":
+            # Generator creates the first candidate
+            gen_output = await dispatch_generator(
+                brief=brief,
+                iteration=0,
+                current_candidate=current_candidate,
+                asi="First iteration — generate initial candidate from the description and criteria.",
+                original_description=original_description,
+            )
+            # Read candidate from file if generator wrote it via Write tool
+            candidate_file = out_path / "iteration-0-candidate.md"
             if candidate_file.exists():
                 current_candidate = candidate_file.read_text(encoding="utf-8")
             else:
-                # Generator didn't write the file — use its output and write it ourselves
+                # Fallback: use agent output, write it ourselves
                 current_candidate = gen_output.candidate
                 candidate_file.write_text(current_candidate, encoding="utf-8")
+        else:
+            # Non-seedless: write the existing candidate as seed
+            if brief.artifact_type == "single-file":
+                (out_path / "iteration-0-candidate.md").write_text(
+                    current_candidate, encoding="utf-8"
+                )
 
-        # c) Evaluator
-        candidate_path = str(out_path / f"iteration-{i}-candidate.md") if brief.artifact_type == "single-file" else None
+        seed_candidate = current_candidate
+
+        # Judge the seed
+        candidate_path = str(out_path / "iteration-0-candidate.md") if brief.artifact_type == "single-file" else None
+
+        # Run evaluator on seed if present
         evaluator_output = await _run_evaluator(
-            brief, candidate_path=candidate_path, iteration=i, output_dir=str(out_path)
+            brief, candidate_path=candidate_path, iteration=0, output_dir=str(out_path)
         ) if brief.evaluator else ""
 
-        # d) Judge
-        # Context discipline: text/creative gets minimal context
-        is_minimal_context = problem_class == "text/creative"
-
-        iteration_history = _build_iteration_history(trajectory)
-        candidate_path = str(out_path / f"iteration-{i}-candidate.md") if brief.artifact_type == "single-file" else None
-        prior_candidate_paths = [
-            str(out_path / f"iteration-{t.iteration}-candidate.md")
-            for t in trajectory
-        ] if brief.artifact_type == "single-file" else None
+        # Gap Fix 6: Cache board composition before the loop
+        cached_board_judges: list[JudgeDefinition] | None = None
+        if brief.judge_mode == "board":
+            from simmer_sdk.judge_board import compose_judges
+            cached_board_judges = await compose_judges(
+                brief=brief,
+                problem_class=problem_class,
+                candidate_summary=current_candidate[:500],
+            )
 
         if brief.judge_mode == "board":
-            stable_wins = track_stable_wins(trajectory)
             judge_result = await dispatch_board(
                 brief=brief,
                 problem_class=problem_class,
-                iteration=i,
+                iteration=0,
                 candidate=current_candidate,
-                seed_candidate=seed_candidate,
-                seed_scores=seed_scores,
                 evaluator_output=evaluator_output or None,
-                previous_asi=None if is_minimal_context else trajectory[-1].asi,
-                iteration_history=None if is_minimal_context else iteration_history,
-                exploration_status=None if is_minimal_context else (exploration_status or None),
-                stable_wins=stable_wins,
                 candidate_path=candidate_path,
                 evaluator_path=evaluator_path,
-                prior_candidate_paths=prior_candidate_paths,
                 cached_judges=cached_board_judges,
             )
         else:
             judge_result = await dispatch_judge(
                 brief=brief,
                 problem_class=problem_class,
-                iteration=i,
+                iteration=0,
                 candidate=current_candidate,
-                seed_candidate=seed_candidate,
-                seed_scores=seed_scores,
                 evaluator_output=evaluator_output or None,
-                previous_asi=None if is_minimal_context else trajectory[-1].asi,
-                iteration_history=None if is_minimal_context else iteration_history,
-                exploration_status=None if is_minimal_context else (exploration_status or None),
                 candidate_path=candidate_path,
                 evaluator_path=evaluator_path,
-                prior_candidate_paths=prior_candidate_paths,
             )
 
         # Write raw judge output for downstream consumers
         if judge_result.raw_text:
-            (out_path / f"iteration-{i}-judgment.md").write_text(
+            (out_path / "iteration-0-judgment.md").write_text(
                 judge_result.raw_text, encoding="utf-8"
             )
 
-        # e) Reflect — LLM-based reflect mirroring the skill
-        reflect_output = await dispatch_reflect(
-            judge_output_text=judge_result.raw_text,
-            generator_report=gen_output.report,
-            iteration=i,
-            max_iterations=max_iterations,
-            criteria=brief.criteria,
-            primary=brief.primary,
-            artifact_type=brief.artifact_type,
-            search_space=brief.search_space,
-            output_dir=out_path,
-            model=brief.clerk_model,
-            judge_asi=judge_result.asi,
+        seed_scores = judge_result.scores
+
+        record = record_iteration(
+            iteration=0,
+            scores=judge_result.scores,
+            key_change="seed",
+            asi=judge_result.asi,
             judge_mode=brief.judge_mode,
-            brief=brief,
+            trajectory=trajectory,
+            primary=brief.primary,
         )
-
-        record = reflect_output.record
-
-        # Override reflect's scores with the authoritative judge scores.
-        # The reflect agent (often a small model) writes scores to trajectory.md
-        # and we read them back, but it sometimes misses board consensus scores
-        # or carries forward seed scores. The judge_result.scores are the
-        # definitive source — they come directly from parse_judge_output() or
-        # the board's compute_consensus_scores().
-        if judge_result.scores:
-            record.scores = judge_result.scores
-            record.composite = round(
-                sum(judge_result.scores.values()) / len(judge_result.scores), 1
-            ) if judge_result.scores else 0.0
-
         trajectory.append(record)
-
-        # Rewrite trajectory.md from Python using authoritative scores.
-        # The reflect agent's trajectory table may have wrong scores
-        # (seed scores carried forward, board consensus missed, etc.).
-        # Python's trajectory list has the correct scores from judge_result.
-        write_trajectory_md(
-            trajectory, list(brief.criteria.keys()),
-            find_best(trajectory, brief.primary), brief.primary, out_path,
-        )
+        if trajectory_logger is not None:
+            trajectory_logger.emit(
+                "iteration",
+                iteration=record.iteration,
+                scores=record.scores,
+                composite=record.composite,
+                key_change=record.key_change,
+                asi=record.asi,
+                regressed=record.regressed,
+            )
+        write_trajectory_md(trajectory, list(brief.criteria.keys()), find_best(trajectory, brief.primary), brief.primary, out_path)
 
         if judge_result.deliberation_summary:
             panel_summary = judge_result.deliberation_summary
-
-        # Use reflect output for stable wins, exploration, direction
-        stable_wins_obj = reflect_output.stable_wins
-        if reflect_output.direction:
-            current_direction = reflect_output.direction
-            stable_wins_obj.direction = current_direction
-        elif current_direction:
-            stable_wins_obj.direction = current_direction
-
-        exploration_status = reflect_output.exploration_status
-
-        # Pass trajectory table from reflect output to callback
-        trajectory_table = reflect_output.trajectory_table
-        if not trajectory_table:
-            # Fallback: generate from Python if LLM didn't produce one
-            trajectory_table = format_trajectory_table(
-                trajectory, list(brief.criteria.keys()),
-                find_best(trajectory, brief.primary), brief.primary,
+            # Gap Fix 8: Parse DIRECTION from deliberation summary
+            direction_match = re.search(
+                r'DIRECTION:\s*\n?(.*?)(?:\n\n|\Z)',
+                judge_result.deliberation_summary,
+                re.DOTALL | re.IGNORECASE,
             )
+            if direction_match:
+                current_direction = direction_match.group(1).strip()
+
+        # Gap Fix 9: Pass trajectory table to callback
+        trajectory_table = format_trajectory_table(
+            trajectory, list(brief.criteria.keys()),
+            find_best(trajectory, brief.primary), brief.primary,
+        )
         await _call_callback(on_iteration, record, trajectory, trajectory_table)
 
-        # f) Plateau detection
-        if check_plateau(trajectory, brief.primary):
-            if brief.judge_mode == "single" and on_plateau is not None:
-                result = await _call_callback(on_plateau, trajectory)
-                if result is True:
-                    # Upgrade to board and add 2 iterations
-                    brief.judge_mode = "board"
-                    max_iterations = min(max_iterations + 2, i + 2 + (max_iterations - i))
+        # ------------------------------------------------------------------
+        # Step 3: Iterations 1-N
+        # ------------------------------------------------------------------
+        max_iterations = brief.iterations
 
-    # ------------------------------------------------------------------
-    # Step 4: Output
-    # ------------------------------------------------------------------
-    best_idx = find_best(trajectory, brief.primary)
-    best_record = trajectory[best_idx]
+        for i in range(1, max_iterations + 1):
+            if trajectory_logger is not None:
+                set_iteration(i)
 
-    best_candidate = _load_candidate_at(brief, out_path, best_record.iteration)
-    if not best_candidate:
-        best_candidate = current_candidate
+            # a) Check for regression rollback
+            best_idx = find_best(trajectory, brief.primary)
+            regression_note = None
+            if trajectory[-1].regressed:
+                if is_workspace:
+                    # Workspace: git rollback to best iteration's commit
+                    best_iter = trajectory[best_idx].iteration
+                    best_sha = iteration_commits.get(best_iter)
+                    if best_sha:
+                        _git_rollback_workspace(
+                            brief.artifact, best_sha, str(out_path)
+                        )
+                    current_candidate = f"[Workspace at {brief.artifact}]"
+                else:
+                    current_candidate = _load_candidate_at(brief, out_path, trajectory[best_idx].iteration)
+                regression_note = (
+                    f"The previous iteration regressed. You are starting from the best version "
+                    f"(iteration {trajectory[best_idx].iteration}), not the latest."
+                )
 
-    # Ensure final state matches best iteration
-    if is_workspace:
-        best_sha = iteration_commits.get(best_record.iteration)
-        if best_sha and best_record.iteration != trajectory[-1].iteration:
-            _git_rollback_workspace(brief.artifact, best_sha, str(out_path))
+            # b) Generator
+            exploration_status = track_exploration(trajectory, brief.search_space)
 
-    # Write final result
-    if brief.artifact_type == "single-file":
-        (out_path / "result.md").write_text(best_candidate, encoding="utf-8")
+            gen_output = await dispatch_generator(
+                brief=brief,
+                iteration=i,
+                current_candidate=current_candidate,
+                asi=trajectory[-1].asi,
+                panel_summary=panel_summary,
+                exploration_status=exploration_status or None,
+                original_description=original_description,
+                regression_note=regression_note,
+            )
 
-    final_stable_wins = track_stable_wins(trajectory)
+            # Capture candidate after generator
+            if is_workspace:
+                # Workspace: generator edited files in place. Commit the changes.
+                sha = _git_commit_iteration(brief.artifact, i)
+                if sha:
+                    iteration_commits[i] = sha
+                current_candidate = f"[Workspace at {brief.artifact}]"
+            else:
+                # Single-file: read candidate from file the generator wrote via Write tool.
+                candidate_file = out_path / f"iteration-{i}-candidate.md"
+                if candidate_file.exists():
+                    current_candidate = candidate_file.read_text(encoding="utf-8")
+                else:
+                    # Generator didn't write the file — use its output and write it ourselves
+                    current_candidate = gen_output.candidate
+                    candidate_file.write_text(current_candidate, encoding="utf-8")
 
-    return SimmerResult(
-        best_candidate=best_candidate,
-        best_iteration=best_record.iteration,
-        best_scores=best_record.scores,
-        composite=best_record.composite,
-        trajectory=trajectory,
-        stable_wins=final_stable_wins.working,
-        not_working=final_stable_wins.not_working,
-        output_dir=out_path,
-        usage=usage_tracker,
-    )
+            # c) Evaluator
+            candidate_path = str(out_path / f"iteration-{i}-candidate.md") if brief.artifact_type == "single-file" else None
+            evaluator_output = await _run_evaluator(
+                brief, candidate_path=candidate_path, iteration=i, output_dir=str(out_path)
+            ) if brief.evaluator else ""
+
+            # d) Judge
+            # Context discipline: text/creative gets minimal context
+            is_minimal_context = problem_class == "text/creative"
+
+            iteration_history = _build_iteration_history(trajectory)
+            candidate_path = str(out_path / f"iteration-{i}-candidate.md") if brief.artifact_type == "single-file" else None
+            prior_candidate_paths = [
+                str(out_path / f"iteration-{t.iteration}-candidate.md")
+                for t in trajectory
+            ] if brief.artifact_type == "single-file" else None
+
+            if brief.judge_mode == "board":
+                stable_wins = track_stable_wins(trajectory)
+                judge_result = await dispatch_board(
+                    brief=brief,
+                    problem_class=problem_class,
+                    iteration=i,
+                    candidate=current_candidate,
+                    seed_candidate=seed_candidate,
+                    seed_scores=seed_scores,
+                    evaluator_output=evaluator_output or None,
+                    previous_asi=None if is_minimal_context else trajectory[-1].asi,
+                    iteration_history=None if is_minimal_context else iteration_history,
+                    exploration_status=None if is_minimal_context else (exploration_status or None),
+                    stable_wins=stable_wins,
+                    candidate_path=candidate_path,
+                    evaluator_path=evaluator_path,
+                    prior_candidate_paths=prior_candidate_paths,
+                    cached_judges=cached_board_judges,
+                )
+            else:
+                judge_result = await dispatch_judge(
+                    brief=brief,
+                    problem_class=problem_class,
+                    iteration=i,
+                    candidate=current_candidate,
+                    seed_candidate=seed_candidate,
+                    seed_scores=seed_scores,
+                    evaluator_output=evaluator_output or None,
+                    previous_asi=None if is_minimal_context else trajectory[-1].asi,
+                    iteration_history=None if is_minimal_context else iteration_history,
+                    exploration_status=None if is_minimal_context else (exploration_status or None),
+                    candidate_path=candidate_path,
+                    evaluator_path=evaluator_path,
+                    prior_candidate_paths=prior_candidate_paths,
+                )
+
+            # Write raw judge output for downstream consumers
+            if judge_result.raw_text:
+                (out_path / f"iteration-{i}-judgment.md").write_text(
+                    judge_result.raw_text, encoding="utf-8"
+                )
+
+            # e) Reflect — LLM-based reflect mirroring the skill
+            reflect_output = await dispatch_reflect(
+                judge_output_text=judge_result.raw_text,
+                generator_report=gen_output.report,
+                iteration=i,
+                max_iterations=max_iterations,
+                criteria=brief.criteria,
+                primary=brief.primary,
+                artifact_type=brief.artifact_type,
+                search_space=brief.search_space,
+                output_dir=out_path,
+                model=brief.clerk_model,
+                judge_asi=judge_result.asi,
+                judge_mode=brief.judge_mode,
+                brief=brief,
+            )
+
+            record = reflect_output.record
+
+            # Override reflect's scores with the authoritative judge scores.
+            # The reflect agent (often a small model) writes scores to trajectory.md
+            # and we read them back, but it sometimes misses board consensus scores
+            # or carries forward seed scores. The judge_result.scores are the
+            # definitive source — they come directly from parse_judge_output() or
+            # the board's compute_consensus_scores().
+            if judge_result.scores:
+                record.scores = judge_result.scores
+                record.composite = round(
+                    sum(judge_result.scores.values()) / len(judge_result.scores), 1
+                ) if judge_result.scores else 0.0
+
+            trajectory.append(record)
+
+            if trajectory_logger is not None:
+                trajectory_logger.emit(
+                    "iteration",
+                    iteration=record.iteration,
+                    scores=record.scores,
+                    composite=record.composite,
+                    key_change=record.key_change,
+                    asi=record.asi,
+                    regressed=record.regressed,
+                )
+
+            # Rewrite trajectory.md from Python using authoritative scores.
+            # The reflect agent's trajectory table may have wrong scores
+            # (seed scores carried forward, board consensus missed, etc.).
+            # Python's trajectory list has the correct scores from judge_result.
+            write_trajectory_md(
+                trajectory, list(brief.criteria.keys()),
+                find_best(trajectory, brief.primary), brief.primary, out_path,
+            )
+
+            if judge_result.deliberation_summary:
+                panel_summary = judge_result.deliberation_summary
+
+            # Use reflect output for stable wins, exploration, direction
+            stable_wins_obj = reflect_output.stable_wins
+            if reflect_output.direction:
+                current_direction = reflect_output.direction
+                stable_wins_obj.direction = current_direction
+            elif current_direction:
+                stable_wins_obj.direction = current_direction
+
+            exploration_status = reflect_output.exploration_status
+
+            # Pass trajectory table from reflect output to callback
+            trajectory_table = reflect_output.trajectory_table
+            if not trajectory_table:
+                # Fallback: generate from Python if LLM didn't produce one
+                trajectory_table = format_trajectory_table(
+                    trajectory, list(brief.criteria.keys()),
+                    find_best(trajectory, brief.primary), brief.primary,
+                )
+            await _call_callback(on_iteration, record, trajectory, trajectory_table)
+
+            # f) Plateau detection
+            if check_plateau(trajectory, brief.primary):
+                if brief.judge_mode == "single" and on_plateau is not None:
+                    result = await _call_callback(on_plateau, trajectory)
+                    if result is True:
+                        # Upgrade to board and add 2 iterations
+                        brief.judge_mode = "board"
+                        max_iterations = min(max_iterations + 2, i + 2 + (max_iterations - i))
+
+        # ------------------------------------------------------------------
+        # Step 4: Output
+        # ------------------------------------------------------------------
+        best_idx = find_best(trajectory, brief.primary)
+        best_record = trajectory[best_idx]
+
+        best_candidate = _load_candidate_at(brief, out_path, best_record.iteration)
+        if not best_candidate:
+            best_candidate = current_candidate
+
+        # Ensure final state matches best iteration
+        if is_workspace:
+            best_sha = iteration_commits.get(best_record.iteration)
+            if best_sha and best_record.iteration != trajectory[-1].iteration:
+                _git_rollback_workspace(brief.artifact, best_sha, str(out_path))
+
+        # Write final result
+        if brief.artifact_type == "single-file":
+            (out_path / "result.md").write_text(best_candidate, encoding="utf-8")
+
+        final_stable_wins = track_stable_wins(trajectory)
+
+        if trajectory_logger is not None:
+            trajectory_logger.emit(
+                "outcome",
+                best_iteration=best_record.iteration,
+                best_scores=best_record.scores,
+                composite=best_record.composite,
+                total_usage=usage_tracker.to_dict(),
+            )
+            await trajectory_logger.aclose()
+            set_active_logger(None)
+
+        return SimmerResult(
+            best_candidate=best_candidate,
+            best_iteration=best_record.iteration,
+            best_scores=best_record.scores,
+            composite=best_record.composite,
+            trajectory=trajectory,
+            stable_wins=final_stable_wins.working,
+            not_working=final_stable_wins.not_working,
+            output_dir=out_path,
+            usage=usage_tracker,
+        )
+    finally:
+        # Always release logger context, even if the run raised, so stale
+        # context can't leak into subsequent work in this task.
+        if trajectory_logger is not None:
+            await trajectory_logger.aclose()
+        _reset_active_logger(None)

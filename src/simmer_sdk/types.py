@@ -102,6 +102,7 @@ class SetupBrief:
     split_generator: bool = False  # Use architect/executor split: generator_model plans, executor_model writes
     split_generator_mode: str = "always"  # "always" = split every iter, "hybrid" = split iter 0, direct edits after
     executor_model: str | None = None  # Model for split generator executor (defaults to clerk_model)
+    trajectory_log_dir: str | None = None  # If set, write a raw JSONL event log of all LLM/tool calls here
 
 
 @dataclass
