@@ -63,8 +63,8 @@ async def main() -> int:
         evaluator="A skilled DnD DM evaluating an adventure hook for table-readiness.",
         iterations=2,
         mode="seedless",
-        judge_mode="single",
-        output_dir="docs/simmer/gemini-dnd-high-judge",
+        judge_mode="board",
+        output_dir="docs/simmer/gemini-dnd-board",
         # Google backend wiring
         api_provider="google",
         gemini_thinking_level="MINIMAL",       # default for everything else

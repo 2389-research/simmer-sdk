@@ -251,11 +251,17 @@ async def _dispatch_single_panelist(
     elif dispatch == "api":
         from simmer_sdk.api_agent import run_api_agent
         from simmer_sdk.client import create_async_client, map_model_id
+        # Gemini adapter rejects tools= for ALL calls; disable on Google.
+        # (string artifacts inline the candidate; workspace judging on Gemini
+        # is inherently tool-less — the alternative is a hard failure.)
+        judge_tools: Optional[list[str]] = ["Read", "Grep", "Glob"]
+        if brief.api_provider == "google":
+            judge_tools = None
         result_text = await run_api_agent(
             prompt=prompt,
             client=create_async_client(brief, role="judge"),
             model=map_model_id(brief.judge_model, brief),
-            tools=["Read", "Grep", "Glob"],
+            tools=judge_tools,
             custom_tools=brief.custom_tools,
             cwd=agent_cwd,
             max_turns=25,

@@ -646,6 +646,11 @@ async def dispatch_reflect(
     if trajectory_md_path.exists():
         trajectory_md = trajectory_md_path.read_text(encoding="utf-8")
 
+    # On Google the clerk has no Write tool (the Gemini adapter rejects tools=),
+    # so it can't author trajectory.md; defined here so it's available on every
+    # dispatch path for the post-agent read below.
+    google_no_tools = bool(brief and brief.api_provider == "google")
+
     prompt = _build_reflect_prompt(
         judge_output_text=judge_output_text,
         generator_report=generator_report,
@@ -677,11 +682,17 @@ async def dispatch_reflect(
     elif dispatch == "api":
         from simmer_sdk.api_agent import run_api_agent
         from simmer_sdk.client import create_async_client, map_model_id
+        # Gemini adapter rejects tools=. The clerk's Write of trajectory.md is
+        # duplicative — Python writes it via write_trajectory_md. The parsed
+        # structured text is what downstream code consumes.
+        reflect_tools: list[str] | None = ["Read", "Write", "Glob"]
+        if google_no_tools:
+            reflect_tools = None
         reflect_text = await run_api_agent(
             prompt=prompt,
             client=create_async_client(brief, role="clerk"),
             model=map_model_id(model, brief) if brief else model,
-            tools=["Read", "Write", "Glob"],
+            tools=reflect_tools,
             custom_tools=brief.custom_tools if brief else None,
             cwd=str(output_dir),
             max_turns=5,
@@ -731,6 +742,14 @@ async def dispatch_reflect(
     trajectory_table = ""
     if trajectory_md_path.exists():
         trajectory_table = trajectory_md_path.read_text(encoding="utf-8")
+
+    # On Google the clerk couldn't Write trajectory.md, so the file on disk may
+    # be stale (or absent). Prefer the table parsed from the agent's structured
+    # text, and persist it so downstream score extraction isn't read from a
+    # previous iteration's rows.
+    if google_no_tools and parsed.get("trajectory_table"):
+        trajectory_table = parsed["trajectory_table"]
+        trajectory_md_path.write_text(trajectory_table, encoding="utf-8")
 
     # Verify iteration numbers are correct — the LLM sometimes mislabels them.
     # Fix any mislabeled iteration number for the current row.
